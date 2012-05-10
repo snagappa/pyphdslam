@@ -18,6 +18,7 @@ int dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda,
 
 // generate inverse of a matrix given its LU decomposition
 void dgetri_(int* N, double* A, int* lda, int* IPIV, double* WORK, int* lwork, int* INFO);
+}
 
 
 void solve_ax_eq_b(py::indexed_ref a, py::indexed_ref b, py::list x, int n, py::list determinant) {
@@ -53,6 +54,43 @@ void solve_ax_eq_b(py::indexed_ref a, py::indexed_ref b, py::list x, int n, py::
         }
     determinant[0] = (double)_det;
     //std::cout << "det=" << determinant << std::endl;
+    
+    // Call the solve function
+    dgetrs_(&trans, &size, &nrhs, a_c, &size, p, b_c, &size, &ok);
+    
+    for(i=0;i<n;i++)
+       x[i]=b_c[i];
+    free(a_c);
+    free(b_c);
+    free(p);
+}
+
+
+void solve_ax_eq_b(py::indexed_ref a, py::indexed_ref b, py::list x, int n) {
+    int i,j;
+    double* a_c;
+    double* b_c;
+    int size;
+    int flag;
+    int* p;
+    int ok;
+    size=n;
+    flag=1;
+    char trans = 'N';
+    int nrhs = 1;
+    
+    a_c= (double *)malloc(sizeof(double)*n*n);
+    b_c= (double *)malloc(sizeof(double)*n);
+    p = (int*)malloc(sizeof(int)*n);
+    for(i=0;i<n;i++)
+       {
+       b_c[i]=b[i];
+       for(j=0;j<n;j++)
+         a_c[i*n+j]=a[i][j];
+       }
+       
+    // Perform the LU decomposition
+    dgetrf_(&size, &size, a_c, &size, p, &ok);
     
     // Call the solve function
     dgetrs_(&trans, &size, &nrhs, a_c, &size, p, b_c, &size, &ok);
@@ -109,6 +147,45 @@ void get_inverse(py::indexed_ref a, int n, py::list determinant, py::list ainv) 
     delete WORK;
 }
 
+
+void get_inverse(py::indexed_ref a, int n, py::list ainv) {
+    int i,j;
+    double* a_c;
+    int size = n;
+    char trans = 'N';
+    int nrhs = 1;
+    int *IPIV = new int[n+1];
+    int LWORK = n*n;
+    double *WORK = new double[LWORK];
+    int INFO;
+
+    a_c = (double *)malloc(sizeof(double)*n*n);
+    //p = (int*)malloc(sizeof(int)*n);
+    for(i=0;i<n;i++)
+       {
+       for(j=0;j<n;j++)
+         a_c[i*n+j]=a[i][j];
+       }
+       
+    // Perform the LU decomposition
+    dgetrf_(&size, &size, a_c, &size, IPIV, &INFO);
+    
+    // Compute the inverse using the LU decomposition
+    dgetri_(&size, a_c ,&size, IPIV, WORK, &LWORK, &INFO);
+    
+    // Copy the inverse to the list
+    for(i=0;i<n;i++)
+       {
+       for(j=0;j<n;j++)
+         ainv[i][j]=a_c[i*n+j];
+       }
+    
+    free(a_c);
+    delete IPIV;
+    delete WORK;
+}
+
+
 void compute_residuals(py::list x, py::list mu, py::list residuals, py::list num_residuals) {
     int num_x = x.length();
     int num_mu = mu.length();
@@ -142,7 +219,7 @@ void compute_residuals(py::list x, py::list mu, py::list residuals, py::list num
         num_residuals[0] = num_x;
     }
 }
-}
+
 """
 
 
@@ -330,8 +407,6 @@ class log_mvnpdf(c_code):
     
     """
     
-    
-
 
 class mvnpdf(c_code):
     def __call__(self):
@@ -339,150 +414,7 @@ class mvnpdf(c_code):
     python_vars = ['likelihood', 'x', 'mu', 'sigma', 'sigmainv', 'a_inv_b',
                    'pi', 'residuals', 'num_residuals', 'determinant', 'LOGPDF']
     libs=['lapack','blas']
-    support_code = """
-    #include <stdio.h>
-    extern "C" {
-    
-    // Solve a linear ssystem of equations ax=b
-    int dgesv_(int *n, int *nrhs, double *a, int *lda, int *ipiv, 
-               double *b, int *ldb, int *info);
-    
-    // LU decomoposition of a general matrix
-    void dgetrf_(int* M, int *N, double* A, int* lda, int* IPIV, int* INFO);
-    
-    // Solve a linear system of equations ax=b using LU decomposition of a
-    int dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, 
-                int *ipiv, double *b, int *ldb, int *info);
-    
-    // generate inverse of a matrix given its LU decomposition
-    void dgetri_(int* N, double* A, int* lda, int* IPIV, double* WORK, int* lwork, int* INFO);
-    
-    
-    void solve_ax_eq_b(py::indexed_ref a, py::indexed_ref b, py::list x, int n, py::list determinant) {
-        int i,j;
-        double* a_c;
-        double* b_c;
-        int size;
-        int flag;
-        int* p;
-        int ok;
-        size=n;
-        flag=1;
-        char trans = 'N';
-        int nrhs = 1;
-        
-        a_c= (double *)malloc(sizeof(double)*n*n);
-        b_c= (double *)malloc(sizeof(double)*n);
-        p = (int*)malloc(sizeof(int)*n);
-        for(i=0;i<n;i++)
-           {
-           b_c[i]=b[i];
-           for(j=0;j<n;j++)
-             a_c[i*n+j]=a[i][j];
-           }
-           
-        // Perform the LU decomposition
-        dgetrf_(&size, &size, a_c, &size, p, &ok);
-        
-        // Determinant is the product of the diaganol
-        double _det = 1.0;
-        for(i=0;i<n;i++) {
-            _det *= a_c[i*n+i];
-            }
-        determinant[0] = (double)_det;
-        //std::cout << "det=" << determinant << std::endl;
-        
-        // Call the solve function
-        dgetrs_(&trans, &size, &nrhs, a_c, &size, p, b_c, &size, &ok);
-        
-        for(i=0;i<n;i++)
-           x[i]=b_c[i];
-        free(a_c);
-        free(b_c);
-        free(p);
-    }
-    
-    
-    void get_inverse(py::indexed_ref a, int n, py::list determinant, py::list ainv) {
-        int i,j;
-        double* a_c;
-        int size = n;
-        char trans = 'N';
-        int nrhs = 1;
-        int *IPIV = new int[n+1];
-        int LWORK = n*n;
-        double *WORK = new double[LWORK];
-        int INFO;
-    
-        a_c = (double *)malloc(sizeof(double)*n*n);
-        //p = (int*)malloc(sizeof(int)*n);
-        for(i=0;i<n;i++)
-           {
-           for(j=0;j<n;j++)
-             a_c[i*n+j]=a[i][j];
-           }
-           
-        // Perform the LU decomposition
-        dgetrf_(&size, &size, a_c, &size, IPIV, &INFO);
-        
-        // Determinant is the product of the diaganol
-        double _det = 1.0;
-        for(i=0;i<n;i++) {
-            _det *= a_c[i*n+i];
-            }
-        determinant[0] = (double)_det;
-        
-        // Compute the inverse using the LU decomposition
-        dgetri_(&size, a_c ,&size, IPIV, WORK, &LWORK, &INFO);
-        
-        // Copy the inverse to the list
-        for(i=0;i<n;i++)
-           {
-           for(j=0;j<n;j++)
-             ainv[i][j]=a_c[i*n+j];
-           }
-        
-        free(a_c);
-        delete IPIV;
-        delete WORK;
-    }
-    
-    void compute_residuals(py::list x, py::list mu, py::list residuals, py::list num_residuals) {
-        int num_x = x.length();
-        int num_mu = mu.length();
-        
-        int state_dimensions = mu[0].length();
-        int icnt, jcnt;
-        
-        // Compute the residuals
-        if (num_x == 1) {
-            for (icnt=0; icnt<num_mu; icnt++) {
-                for (jcnt=0; jcnt<state_dimensions; jcnt++) {
-                    residuals[icnt][jcnt] = (double)x[0][jcnt]-(double)mu[icnt][jcnt];
-                }
-            }
-            num_residuals[0] = num_mu;
-        }
-        else if (num_mu == 1) {
-            for (icnt=0; icnt<num_x; icnt++) {
-                for (jcnt=0; jcnt<state_dimensions; jcnt++) {
-                    residuals[icnt][jcnt] = (double)x[icnt][jcnt]-(double)mu[0][jcnt];
-                }
-            }
-            num_residuals[0] = num_x;
-        }
-        else {
-            for (icnt=0; icnt<num_x; icnt++) {
-                for (jcnt=0; jcnt<state_dimensions; jcnt++) {
-                    residuals[icnt][jcnt] = (double)x[icnt][jcnt]-(double)mu[icnt][jcnt];
-                }
-            }
-            num_residuals[0] = num_x;
-        }
-    }
-    }
-    """
-    
+    support_code = global_support_code
     code = """
     int num_x = x.length();
     int num_mu = mu.length();
@@ -551,6 +483,71 @@ class mvnpdf(c_code):
         }
     }
     
+    """
+
+
+class mahalanobis(c_code):
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    python_vars = ['mahalanobis_dist', 'x', 'y', 'P', 'sigmainv', 'a_inv_b',
+                   'residuals', 'num_residuals']
+    libs=['lapack','blas']
+    support_code = global_support_code
+    code = """
+    int num_x = x.length();
+    int num_y = y.length();
+    int num_P = P.length();
+    
+    int state_dimensions = x[0].length();
+    int icnt, jcnt, st_dim_cntx, st_dim_cnty;
+    
+    compute_residuals(x, mu, residuals, num_residuals);
+    
+    if (num_P == 1) {
+        // One sigma, many residuals
+        get_inverse(P[0], state_dimensions, sigmainv);
+        
+        double inner_tmp_result, outer_result;
+        
+        for (icnt = 0; icnt < (int)num_residuals[0]; icnt++) {
+            outer_result = 0;
+            for (st_dim_cntx=0; st_dim_cntx<state_dimensions; st_dim_cntx++) {
+                inner_tmp_result = 0;
+                for (st_dim_cnty=0; st_dim_cnty<state_dimensions; st_dim_cnty++) {
+                    inner_tmp_result += (double)sigmainv[st_dim_cntx][st_dim_cnty]*(double)residuals[icnt][st_dim_cnty];
+                }
+                outer_result += (double)residuals[icnt][st_dim_cntx]*inner_tmp_result;
+            }
+            mahalanobis_dist[icnt] = sqrt(outer_result);
+        }
+    }
+    
+    else {
+        double outer_result;
+        
+        if (num_residuals == 1) {
+            // Many sigma, one residual
+            for (int sigma_cnt=0; sigma_cnt<num_P; sigma_cnt++) {
+                outer_result = 0;
+                solve_ax_eq_b(sigma[sigma_cnt], residuals[0], a_inv_b, state_dimensions);
+                for (st_dim_cntx=0; st_dim_cntx<state_dimensions; st_dim_cntx++) {
+                    outer_result += (double)residuals[0][st_dim_cntx]*(double)a_inv_b[st_dim_cntx];
+                }
+                mahalanobis_dist[sigma_cnt] = sqrt(outer_result);
+            }
+        }
+        else {
+            // Many sigma, many residuals
+            for (int sigma_cnt=0; sigma_cnt<num_P; sigma_cnt++) {
+                outer_result = 0;
+                solve_ax_eq_b(sigma[sigma_cnt], residuals[sigma_cnt], a_inv_b, state_dimensions, determinant);
+                for (st_dim_cntx=0; st_dim_cntx<state_dimensions; st_dim_cntx++) {
+                    outer_result += (double)residuals[sigma_cnt][st_dim_cntx]*(double)a_inv_b[st_dim_cntx];
+                }
+                mahalanobis_dist[sigma_cnt] = sqrt(outer_result);
+            }
+        }
+    }
     """
 
 

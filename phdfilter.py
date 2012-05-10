@@ -49,49 +49,63 @@ class PHD(object):
                  obs_fn_handle, obs_fn_parameters, 
                  clutter_fn_handle, clutter_fn_parameters,
                  birth_fn_handle, birth_fn_parameters,
-                 ps_fn_handle, pd_fn_handle, likelihood_fn_handle,
+                 ps_fn_handle, ps_fn_parameters, 
+                 pd_fn_handle, pd_fn_parameters, 
+                 likelihood_fn_handle, likelihood_fn_parameters, 
                  estimate_fn_handle, 
                  phd_parameters={"nparticles":100,
                                  "elim_threshold":1e-3}):
+        # Markov prediction
         self.markov_predict_fn_handle = markov_predict_fn_handle
         self.markov_predict_fn_parameters = markov_predict_fn_parameters
-        
+        # State update functions - unused here
         self.state_update_fn_handle = state_update_fn_handle
         self.state_update_fn_parameters = state_update_fn_parameters
-        
+        # Observation function - transform from state to obs space
         self.obs_fn_handle = obs_fn_handle
         self.obs_fn_parameters = obs_fn_parameters
-        
+        # Clutter function
         self.clutter_fn_handle = clutter_fn_handle
         self.clutter_fn_parameters = clutter_fn_parameters
-        
+        # Birth function
         self.birth_fn_handle = birth_fn_handle
         self.birth_fn_parameters = birth_fn_parameters
-        
+        # Survival function
         self.ps_fn_handle = ps_fn_handle
+        self.ps_fn_parameters = ps_fn_parameters
+        # Detection function
         self.pd_fn_handle = pd_fn_handle
+        self.pd_fn_parameters = pd_fn_parameters
+        # Likelihood function
         self.likelihood_fn_handle = likelihood_fn_handle
-        
+        self.likelihood_fn_parameters = likelihood_fn_parameters
+        # Estimator function - unused here
         self.estimate_fn_handle = estimate_fn_handle
-        
+        # Other PHD parameters
         self.phd_parameters = phd_parameters
-    
+        
+        self.states = []
+        self.weights = np.array([])
+        self._states_ = []
+        self._weights_ = np.array([])
+        
     
     def init(self, states, weights):
         self.states = states
         self.weights = weights
-    
+        self._states_ = copy.deepcopy(states)
+        self._weights_ = weights.copy()
+        
     
     def phdPredict(self):
-        survival_probability = self.ps_fn_handle(self.states)
+        survival_probability = self.ps_fn_handle(self.states, self.ps_fn_parameters)
         self.weights.__imul__(survival_probability)
-        self.markov_predict_fn_handle(self.states, self.predict_fn_parameters)
+        self.states = self.markov_predict_fn_handle(self.states, self.markov_predict_fn_parameters)
     
     
     def phdAppendBirth(self, birth_states, birth_weights):
         self.states += birth_states
         self.weights = np.append(self.weights, birth_weights)
-        pass
     
     
     def phdUpdate(self, observation_set):
@@ -100,10 +114,10 @@ class PHD(object):
 
         num_observations = len(observation_set)
         
-        detection_probability = self.pd_fn_handle(self.states)
+        detection_probability = self.pd_fn_handle(self.states, self.pd_fn_parameters)
         clutter_pdf = [self.clutter_fn_handle(_observation_) for _observation_ in observation_set]
         
-        # Account for missed detection
+        # Account for missed detection and duplicate the state num_obs times
         self._states_ = [copy.deepcopy(self.states) for count in range(num_observations+1)]
         self._weights_ = [self.weights*(1-detection_probability)]
         
@@ -116,7 +130,7 @@ class PHD(object):
         #    new_states = [self.state_update_fn_handle(copy.deepcopy(self.states), _observation_, self.state_update_fn_parameters) for _observation_ in observation_set]
         
         # Evaluate the likelihood (post-update)
-        likelihood = [self.likelihood_fn_handle(_observation_, self.states) for _observation_ in observation_set]
+        likelihood = [self.likelihood_fn_handle(_observation_, self.states, self.likelihood_fn_parameters) for _observation_ in observation_set]
         
         
         for obs_count in range(num_observations):
@@ -132,9 +146,9 @@ class PHD(object):
         
         
     def phdPrune(self):
-        if self.phd_parameters.elim_threshold <= 0:
+        if self.phd_parameters['elim_threshold'] <= 0:
             return
-        retain_indices = np.flatnonzero(np.array([_weights_.sum() for _weights_ in self._weights_])>=self.phd_parameters.elim_threshold)
+        retain_indices = np.flatnonzero(np.array([_weights_.sum() for _weights_ in self._weights_])>=self.phd_parameters['elim_threshold'])
         pruned_states = [self._states_[ri] for ri in retain_indices]
         pruned_weights = [self._weights_[ri] for ri in retain_indices]
         self._states_ = pruned_states
@@ -152,7 +166,7 @@ class PHD(object):
         return filter_estimates
         
     
-    def phdResample(self, forceCopy=False):
+    def phdResample(self, forceCopy=True):
         sum_weights = [_weights_.sum() for _weights_ in self._weights_]
         nparticles = np.array(sum_weights)*self.phd_parameters["nparticles"]
         for count in range(len(self._weights_)):

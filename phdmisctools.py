@@ -229,9 +229,42 @@ def imul(vec, mul_fac):
     
     
 def mahalanobis(x, P, y):
+    num_x = len(x)
+    num_y = len(y)
+    num_P = len(P)
     
+    state_dimensions = len(x[0])
     
+    residuals = [np.empty(state_dimensions, dtype=float).tolist() for i in range(np.max([num_x, num_y]))]
+    num_residuals = [0]
+    
+    mahalanobis_dist = np.empty(np.max([num_x, num_y, num_P]), dtype=float)
+    sigmainv = np.empty((state_dimensions,state_dimensions)).tolist()
+    a_inv_b = np.empty(state_dimensions).tolist()
+    
+    ccode = python_c_code.mahalanobis()
+    weave.inline(ccode.code, ccode.python_vars, 
+                 support_code=ccode.support_code, libraries=ccode.libs, 
+                 compiler=COMPILER, force=FORCE_RECOMPILE, 
+                 extra_compile_args=EXTRA_COMPILE_ARGS, verbose=VERBOSE)
+    return mahalanobis_dist
 
+
+def merge_states(wt, x, P):
+    num_x = len(x)
+    merged_wt = wt.sum()
+    merged_x = np.sum([x[i]*wt[i] for i in range(num_x)], 0)/merged_wt
+    residuals = _compute_residuals_(x, [merged_x])
+    merged_P = sum([wt[i]*(P[i] + dot(np.matrix(residuals[i]).T, np.matrix(residuals[i])) for i in range(num_x))], 0)/merged_wt
+    return merged_wt, merged_x, merged_P
+    
+    
+def delete_from_list(x, indices):
+    indices.sort()
+    indices.reverse()
+    [x.__delitem__(idx) for idx in indices]
+    
+    
 # Code taken from:
 #   http://www.sagemath.org/doc/numerical_sage/weave.html
 def weave_solve(a,b):
