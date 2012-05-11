@@ -250,12 +250,28 @@ def mahalanobis(x, P, y):
     return mahalanobis_dist
 
 
+def cholesky(Amat):
+    #A = [Amat]
+    #invA = [np.matrix(np.empty(Amat.shape))]
+    A = Amat.tolist()
+    invA = np.matrix(np.zeros(Amat.shape)).tolist()
+    dims = Amat.shape[0]
+    
+    ccode = python_c_code.cholesky()
+    weave.inline(ccode.code, ccode.python_vars, 
+                 support_code=ccode.support_code, libraries=ccode.libs, 
+                 compiler=COMPILER, force=FORCE_RECOMPILE, 
+                 extra_compile_args=EXTRA_COMPILE_ARGS, verbose=VERBOSE)
+                 #type_converters=weave.converters.blitz)
+    return invA
+    
+    
 def merge_states(wt, x, P):
     num_x = len(x)
     merged_wt = wt.sum()
     merged_x = np.sum([x[i]*wt[i] for i in range(num_x)], 0)/merged_wt
     residuals = _compute_residuals_(x, [merged_x])
-    merged_P = sum([wt[i]*(P[i] + dot(np.matrix(residuals[i]).T, np.matrix(residuals[i])) for i in range(num_x))], 0)/merged_wt
+    merged_P = sum([wt[i]*(P[i] + np.dot(np.matrix(residuals[i]).T, np.matrix(residuals[i])) for i in range(num_x))], 0)/merged_wt
     return merged_wt, merged_x, merged_P
     
     
@@ -265,6 +281,48 @@ def delete_from_list(x, indices):
     [x.__delitem__(idx) for idx in indices]
     
     
+def kalman_update(x, P, H, R, z=None):
+    num_x = len(x)
+    if len(H) == 1:
+        h_idx = [0]*num_x
+    else:
+        h_idx = range(num_x)
+    if len(R) == 1:
+        r_idx = [0]*num_x
+    else:
+        r_idx = range(num_x)
+        
+    kalman_info = lambda:0
+    # Evaluate inverse and determinant using Cholesky decomposition
+    sqrt_S = [np.linalg.cholesky(H[h_idx[i]]*P[i]*H[h_idx[i]].T + R[r_idx[i]]) for i in range(num_x)]
+    inv_sqrt_S = [sqrt_S[i].getI() for i in range(num_x)]
+    
+    det_S = [np.diag(sqrt_S[i]).prod()**2 for i in range(num_x)]
+    inv_S = [inv_sqrt_S[i].T*inv_sqrt_S[i] for i in range(num_x)]
+    
+    # Kalman gain
+    kalman_gain = [P[i]*H[h_idx[i]].T*inv_S[i] for i in range(num_x)]
+    
+    # Predicted observations
+    pred_z = [np.dot(H[h_idx[i]],x[i]).A[0] for i in range(num_x)]
+    
+    # Update to new state if observations were received
+    if not (z is None):
+        residuals = phdmisctools._compute_residuals_(z, pred_z)
+        #[z - pred_z[i] for i in range(num_x)]
+        x_upd = [x[i] + np.dot(kalman_gain[i], residuals[i]).A[0] for i in range(num_x)]
+    else:
+        x_upd = x
+        
+    # Update covariance
+    P_upd = [P[i] - (kalman_gain[i]*H[h_idx[i]]*P[i]) for i in range(num_x)]
+    
+    kalman_info.inv_sqrt_S = inv_sqrt_S
+    kalman_info.det_S = det_S
+    kalman_info.pred_z = pred_z
+    kalman_info.kalman_gain = kalman_gain
+    
+    return x_upd, P_upd, kalman_info
 # Code taken from:
 #   http://www.sagemath.org/doc/numerical_sage/weave.html
 def weave_solve(a,b):

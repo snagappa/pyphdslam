@@ -227,4 +227,50 @@ cholesky_solve(const TRIA& L, VEC& x, ublas::lower)
 }
 
 
+
+
+
+/** \brief make a immutable triangular adaptor from a matrix
+ *
+ * \usage: 
+<code>
+ A = triangular< lower >(B);
+ A = triangular(B, lower());
+</code>
+ */
+template < class TYPE, class MATRIX >
+ublas::triangular_adaptor<const MATRIX, TYPE>
+triangular(const MATRIX & A, const TYPE& uplo = TYPE())
+{
+  return ublas::triangular_adaptor<const MATRIX, TYPE>(A);
+}
+
+/** \brief make a immutable banded adaptor from a matrix
+ *
+ * \usage: 
+<code>
+ A = banded(B, lower, upper);
+</code>
+ */
+template < class MATRIX >
+ublas::banded_adaptor<const MATRIX>
+banded(const MATRIX & A, const size_t lower, const size_t upper)
+{
+  return ublas::banded_adaptor<const MATRIX>(A, lower, upper);
+}
+
+/** \brief make a immutable symmetric adaptor from a matrix
+ *
+ * \usage: 
+<code>
+ A = symmetric< lower >(B);
+ A = symmetric(B, lower());
+</code>
+ */
+template < class TYPE, class MATRIX >
+ublas::symmetric_adaptor<const MATRIX, TYPE>
+symmetric(const MATRIX & A, const TYPE& uplo = TYPE())
+{
+  return ublas::symmetric_adaptor<const MATRIX, TYPE>(A);
+}
 #endif

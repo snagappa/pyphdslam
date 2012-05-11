@@ -46,6 +46,7 @@ def fn_params(handle=None, parameters=None):
     fn = (lambda:0)
     fn.handle = handle
     fn.parameters = parameters
+    return fn
     
 
 class PHD(object):

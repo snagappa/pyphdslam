@@ -1,8 +1,44 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
+#
+#       python_c_code.py
+#       
+#       Copyright 2012 Sharad Nagappa <snagappa@gmail.com>
+#       
+#       This program is free software; you can redistribute it and/or modify
+#       it under the terms of the GNU General Public License as published by
+#       the Free Software Foundation; either version 2 of the License, or
+#       (at your option) any later version.
+#       
+#       This program is distributed in the hope that it will be useful,
+#       but WITHOUT ANY WARRANTY; without even the implied warranty of
+#       MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#       GNU General Public License for more details.
+#       
+#       You should have received a copy of the GNU General Public License
+#       along with this program; if not, write to the Free Software
+#       Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+#       MA 02110-1301, USA.
+#       
+#       
+#   Some code copyright of Gunter Winkler, Konstantin Kutzkow (2005)
 
 global_support_code = """
 #include <stdio.h>
+
+// For Cholesky decomposition
+#include <cassert>
+#include <limits>
+#include <boost/numeric/ublas/vector.hpp>
+#include <boost/numeric/ublas/vector_proxy.hpp>
+#include <boost/numeric/ublas/triangular.hpp>
+#include <boost/numeric/ublas/banded.hpp>
+#include <boost/numeric/ublas/symmetric.hpp>
+#include <boost/numeric/ublas/matrix.hpp>
+#include <boost/numeric/ublas/matrix_proxy.hpp>
+#include <boost/numeric/ublas/io.hpp>
+#include "/home/snagappa/projects/python/phdslam/cholesky.hpp"
+
 extern "C" {
 
 // Solve a linear ssystem of equations ax=b
@@ -220,6 +256,43 @@ void compute_residuals(py::list x, py::list mu, py::list residuals, py::list num
     }
 }
 
+/*
+int do_cholesky(py::indexed_ref pyA, int dims, py::indexed_ref invA) {
+    //copyright            : (C) 2005 by Gunter Winkler, Konstantin Kutzkow
+    //email                : guwi17@gmx.de
+    
+    size_t size = dims;
+    
+    double pr, de, sv;
+
+    typedef double DBL;
+    typedef ublas::row_major  ORI;
+    // use dense matrix
+    ublas::matrix<DBL, ORI> A (size, size);
+    ublas::matrix<DBL, ORI> T (size, size);
+    ublas::matrix<DBL, ORI> L (size, size);
+
+    A = ublas::zero_matrix<DBL>(size, size);
+
+    ublas::vector<DBL> b (size);
+    ublas::vector<DBL> x (size);
+    ublas::vector<DBL> y (size);
+
+    for(int i=0;i<size;i++) {
+        for(int j=0;j<size;j++)
+            A(i, j)=pyA(i)[j];
+    }
+    
+    size_t res = cholesky_decompose(A, L);
+    
+    for(int i=0;i<size;i++) {
+        for(int j=0;j<size;j++)
+            invA[i][j]=L(i, j);
+    }
+    
+    return(res);
+}
+*/
 """
 
 
@@ -550,6 +623,47 @@ class mahalanobis(c_code):
     }
     """
 
+
+class cholesky(c_code):
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    python_vars = ['A', 'invA', 'dims']
+    libs=['lapack','blas']
+    support_code = global_support_code
+    code = """
+    //do_cholesky(A[0], dims, invA[0]);
+    
+    //copyright            : (C) 2005 by Gunter Winkler, Konstantin Kutzkow
+    //email                : guwi17@gmx.de
+    
+    size_t size = dims;
+    
+    double pr, de, sv;
+
+    typedef double DBL;
+    typedef ublas::row_major  ORI;
+    // use dense matrix
+    ublas::matrix<DBL, ORI> ublasA (size, size);
+    ublas::matrix<DBL, ORI> L (size, size);
+
+    ublasA = ublas::zero_matrix<DBL>(size, size);
+    
+
+    for(int i=0;i<size;i++) {
+        for(int j=0;j<size;j++)
+            ublasA(i, j)=A[i][j];
+    }
+    
+    size_t res = cholesky_decompose(ublasA, L);
+    
+    for(int i=0;i<size;i++) {
+        for(int j=0;j<size;j++)
+            invA[i][j]=L(i, j);
+    }
+    
+    //return(res);
+    """
+    
 
 log_mvnpdf_code_orig = """
 int num_x = x.length();

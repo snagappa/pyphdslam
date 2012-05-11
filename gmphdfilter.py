@@ -157,7 +157,8 @@ class GMPHD(PHD):
         
     
     def phdFlattenUpdate(self):
-        pass
+        self.states = self._states_
+        self._weights_ = self._weights_
     
     
     def phdEstimate(self):
@@ -174,6 +175,18 @@ class GMPHD(PHD):
         estimate.state = est_state
         estimate.weight = est_weight
         return estimate
+        
+        
+    def phdIterate(self, observations):
+        self.phdPredict()
+        self.phdUpdate(observations)
+        estimates = self.phdEstimate()
+        self.phdPrune()
+        self.phdMerge()
+        self.phdFlattenUpdate()
+        birth_states, birth_weights = self.phdGenerateBirth(observations)
+        self.phdAppendBirth(birth_states, birth_weights)
+        return estimates
     
 
 def kalman_predict(x, P, F, Q):
@@ -230,7 +243,7 @@ def kalman_update(x, P, H, R, z=None):
         x_upd = x
         
     # Update covariance
-    P_upd = [P[i] - (kalman_gain[i]*H[h_idx[i]]*P[i])]
+    P_upd = [P[i] - (kalman_gain[i]*H[h_idx[i]]*P[i]) for i in range(num_x)]
     
     kalman_info.inv_sqrt_S = inv_sqrt_S
     kalman_info.det_S = det_S
@@ -274,11 +287,11 @@ def measurement_birth(state, z, parameters):
     
 
 def constant_survival(state, parameters):
-    return [parameters.ps]*len(state)
+    return parameters.ps*np.ones(len(state))
     
 
 def constant_detection(state, parameters):
-    return [parameters.pd]*len(state)
+    return parameters.pd*np.ones(len(state))
 
 
 def default_constant_position_model(dims=2):
@@ -323,7 +336,7 @@ def default_phd_parameters():
     ps_fn = fn_params(ps_fn_handle, ps_fn_parameters)
     pd_fn_handle = constant_detection
     pd_fn_parameters = placeholder()
-    pd_fn_parameters = 0.98
+    pd_fn_parameters.pd = 0.98
     pd_fn = fn_params(pd_fn_handle, pd_fn_parameters)
     
     # Use default estimator
@@ -337,6 +350,17 @@ def default_gm_parameters():
                       "elim_threshold":1e-4, 
                       "merge_threshold":4}
     return phd_parameters
+    
+    
+def default_gmphd_obj(dims=2):
+    markov_predict_fn, obs_fn, likelihood_fn = default_constant_position_model(dims=2)
+    state_update_fn, clutter_fn, birth_fn, ps_fn, pd_fn, estimate_fn = \
+        default_phd_parameters()
+    phd_parameters = default_gm_parameters()
+    gmphdobj = GMPHD(markov_predict_fn, obs_fn, likelihood_fn, state_update_fn,
+                     clutter_fn, birth_fn, ps_fn, pd_fn, estimate_fn, 
+                     phd_parameters)
+    return gmphdobj
     
     
 def gmphdfilter(observations):
@@ -359,6 +383,7 @@ def gmphdfilter(observations):
         estimates += [gmphdobj.phdEstimate()]
         gmphdobj.phdPrune()
         gmphdobj.phdMerge()
+        gmphdobj.phdFlattenUpdate()
         birth_states, birth_weights = gmphdobj.phdGenerateBirth(obs)
         gmphdobj.phdAppendBirth(birth_states, birth_weights)
         
