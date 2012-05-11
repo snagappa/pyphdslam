@@ -23,42 +23,29 @@
 #       
 
 import numpy as np
-from phdfilter import PHD
+from phdfilter import PHD, fn_params
 import phdmisctools
 import copy
-
 
 def placeholder():
     return (lambda:0)
 
 
 class GMPHD(PHD):
-    def __init__(self, markov_predict_fn_handle, markov_predict_fn_parameters,
-                 state_update_fn_handle, state_update_fn_parameters,
-                 obs_fn_handle, obs_fn_parameters,
-                 clutter_fn_handle, clutter_fn_parameters,
-                 birth_fn_handle, birth_fn_parameters,
-                 ps_fn_handle, ps_fn_parameters, 
-                 pd_fn_handle, pd_fn_parameters, 
-                 likelihood_fn_handle, likelihood_fn_parameters, 
-                 estimate_fn_handle,
+    def __init__(self, markov_predict_fn, obs_fn, likelihood_fn,
+                 state_update_fn, clutter_fn, birth_fn, ps_fn, pd_fn,
+                 estimate_fn,
                  phd_parameters={"max_terms":100,
                                  "elim_threshold":1e-4,
                                  "merge_threshold":4}):
-        super(GMPHD, self).__init__( 
-            markov_predict_fn_handle, markov_predict_fn_parameters, 
-            state_update_fn_handle, state_update_fn_parameters,
-            obs_fn_handle, obs_fn_parameters, 
-            clutter_fn_handle, clutter_fn_parameters,
-            birth_fn_handle, birth_fn_parameters,
-            ps_fn_handle, ps_fn_parameters,
-            pd_fn_handle, pd_fn_parameters,
-            likelihood_fn_handle, likelihood_fn_parameters, 
-            estimate_fn_handle, phd_parameters)
+        super(GMPHD, self).__init__(markov_predict_fn, obs_fn, likelihood_fn,
+                                    state_update_fn, clutter_fn, birth_fn,
+                                    ps_fn, pd_fn, estimate_fn, phd_parameters)
         
     
     def phdGenerateBirth(self, observation_set):
-        birth_states, birth_weights = self.birth_fn_handle(observation_set, self.birth_fn_parameters)
+        birth_states, birth_weights = \
+            self.birth_fn.handle(observation_set, self.birth_fn.parameters)
         return birth_states, birth_weights
         
         
@@ -70,8 +57,11 @@ class GMPHD(PHD):
         else:
             z_dim = 0
         
-        detection_probability = self.pd_fn_handle(self.states)
-        clutter_pdf = [self.clutter_fn_handle(_observation_) for _observation_ in observation_set]
+        detection_probability = self.pd_fn.handle(self.states, 
+                                                  self.pd_fn.parameters)
+        clutter_pdf = [self.clutter_fn.handle(_observation_, 
+                                              self.clutter_fn.parameters) \
+                       for _observation_ in observation_set]
         
         # Account for missed detection
         self._states_ = copy.deepcopy(self.states)
@@ -86,25 +76,29 @@ class GMPHD(PHD):
         
         # Part of the Kalman update is common to all observation-updates
         x, P, kalman_info = kalman_update(x, P, 
-                                          self.obs_fn_parameters.H, 
-                                          self.obs_fn_parameters.R)
+                                          self.obs_fn.parameters.H, 
+                                          self.obs_fn.parameters.R)
         
         # We need to update the states and find the updated weights
         for (_observation_, obs_count) in zip(observation_set, range(num_observations)):
             new_x = copy.deepcopy(x)
             # Apply the Kalman update to get the new state - update in-place
             # and return the residuals
-            residuals = kalman_update_x(new_x, kalman_info.pred_z, _observation_, kalman_info.kalman_gain)
+            residuals = kalman_update_x(new_x, kalman_info.pred_z, 
+                                        _observation_, kalman_info.kalman_gain)
             
             # Calculate the weight of the Gaussians for this observation
             # Calculate term in the exponent
-            x_pdf = [np.exp(-0.5*(np.dot(kalman_info.inv_sqrt_S[i], residuals[i]).A[0]**2).sum())/np.sqrt(kalman_info.det_S[i]*(2*np.pi)^z_dim) for i in range(num_x)]
+            x_pdf = [np.exp(-0.5*(np.dot(kalman_info.inv_sqrt_S[i], 
+                                         residuals[i]).A[0]**2).sum())/ \
+                    np.sqrt(kalman_info.det_S[i]*(2*np.pi)^z_dim) 
+                    for i in range(num_x)]
             new_weight = self.weights*x_pdf
             # Normalise the weights
             new_weight.__idiv__(clutter_pdf(obs_count) + new_weight.sum())
             
             # Create new state with new_x and P to add to _states_
-            self._states_ += [[new_x[i], copy.copy(P[i])] for i in range(num_x)]
+            self._states_ +=[[new_x[i], copy.copy(P[i])] for i in range(num_x)]
             self._weights_ += [new_weight]
             
         self._weights_ = np.concatenate(self._weights_)
@@ -147,9 +141,10 @@ class GMPHD(PHD):
             
             x_merge_list = [x_list[i] for i in merge_list_indices]
             P_merge_list = [P_list[i] for i in merge_list_indices]
-            merged_wt, merged_x, merged_P = phdmisctools.merge_states(self._weights_[merge_list_indices], 
-                                                                      x_merge_list,
-                                                                      P_merge_list)
+            merged_wt, merged_x, merged_P = \
+                phdmisctools.merge_states(self._weights_[merge_list_indices], 
+                                          x_merge_list,
+                                          P_merge_list)
             result_wt_list += [merged_wt]
             result_state_list += [[merged_x, merged_P]]
             
@@ -228,7 +223,8 @@ def kalman_update(x, P, H, R, z=None):
     
     # Update to new state if observations were received
     if not (z is None):
-        residuals = [z - pred_z[i] for i in range(num_x)]
+        residuals = phdmisctools._compute_residuals_(z, pred_z)
+        #[z - pred_z[i] for i in range(num_x)]
         x_upd = [x[i] + np.dot(kalman_gain[i], residuals[i]).A[0] for i in range(num_x)]
     else:
         x_upd = x
@@ -246,7 +242,8 @@ def kalman_update(x, P, H, R, z=None):
 
 def kalman_update_x(x, zhat, z, kalman_gain):
     num_x = len(x)
-    residuals = [z - zhat[i] for i in range(num_x)]
+    residuals = phdmisctools._compute_residuals_(z, zhat)
+    #residuals = [z - zhat[i] for i in range(num_x)]
     x_upd = [x[i] + np.dot(kalman_gain[i], residuals[i]).A[0] for i in range(num_x)]
     return x_upd, residuals
     
@@ -266,13 +263,15 @@ def uniform_clutter(z, parameters):
 
 def measurement_birth(state, z, parameters):
     # Convert the observation to state space
+    x = parameters.obs2state(z)
     
     # Couple each with (observation) noise
+    P = [copy.copy(parameters.R) for count in range(len(z))]
     
-    # birth_states = [x[i], P[i] for i in range(len(z))]
-    # birth_weights = parameters.intensity*range(len(z))
-    # return birth_states, birth_weights
-    pass
+    birth_states = [[x[i], P[i]] for i in range(len(z))]
+    birth_weights = parameters.intensity*range(len(z))
+    return birth_states, birth_weights
+    
 
 def constant_survival(state, parameters):
     return [parameters.ps]*len(state)
@@ -282,59 +281,76 @@ def constant_detection(state, parameters):
     return [parameters.pd]*len(state)
 
 
-def gmphdfilter(observations):
-    # Markov prediction
+def default_constant_position_model(dims=2):
     markov_predict_fn_handle = markov_predict
     markov_predict_fn_parameters = placeholder()
-    markov_predict_fn_parameters.F = [np.matrix(np.eye(4))]
-    markov_predict_fn_parameters.Q = [np.matrix(np.eye(4))]
+    markov_predict_fn_parameters.F = [np.matrix(np.eye(dims))]
+    markov_predict_fn_parameters.Q = [np.matrix(np.eye(dims))]
+    markov_predict_fn = fn_params(markov_predict_fn_handle, markov_predict_fn_parameters)
     
-    # State update
-    state_update_fn_handle = None
-    state_update_fn_parameters = None
     obs_fn_handle = None
     obs_fn_parameters = placeholder()
-    obs_fn_parameters.H = [np.matrix(np.eye(4))]
-    obs_fn_parameters.R = [np.matrix(np.eye(4))]
+    obs_fn_parameters.H = [np.matrix(np.eye(dims))]
+    obs_fn_parameters.R = [np.matrix(np.eye(dims))]
+    obs_fn = fn_params(obs_fn_handle, obs_fn_parameters)
+    
+    # Likelihood function - not used here
+    likelihood_fn = fn_params()
+    
+    return (markov_predict_fn, obs_fn, likelihood_fn)
+    
+    
+def default_phd_parameters():
+    state_update_fn = fn_params()
     
     # Clutter function
     clutter_fn_handle = uniform_clutter
     clutter_fn_parameters = placeholder()
     clutter_fn_parameters.intensity = 2
-    clutter_fn_parameters.range = [[-0.5, 0.5], [-0.5, 0.5]]
+    clutter_fn_parameters.range = [[-1, 1], [-1, 1]]
+    clutter_fn = fn_params(clutter_fn_handle, clutter_fn_parameters)
     
     # Birth function
     birth_fn_handle = measurement_birth
     birth_fn_parameters = placeholder()
     birth_fn_parameters.intensity = 0.01
+    birth_fn = fn_params(birth_fn_handle, birth_fn_parameters)
     
     # Survival/detection probability
     ps_fn_handle = constant_survival
     ps_fn_parameters = placeholder()
     ps_fn_parameters.ps = 1
+    ps_fn = fn_params(ps_fn_handle, ps_fn_parameters)
     pd_fn_handle = constant_detection
     pd_fn_parameters = placeholder()
     pd_fn_parameters = 0.98
+    pd_fn = fn_params(pd_fn_handle, pd_fn_parameters)
     
-    # Likelihood function - not used here
-    likelihood_fn_handle = None
-    likelihood_fn_parameters = None
     # Use default estimator
-    estimate_fn_handle = None
+    estimate_fn = fn_params()
+    
+    return (state_update_fn, clutter_fn, birth_fn, ps_fn, pd_fn, estimate_fn)
+    
+    
+def default_gm_parameters():
+    phd_parameters = {"max_terms":100, 
+                      "elim_threshold":1e-4, 
+                      "merge_threshold":4}
+    return phd_parameters
+    
+    
+def gmphdfilter(observations):
+    markov_predict_fn, obs_fn, likelihood_fn = default_constant_position_model(dims=2)
+    state_update_fn, clutter_fn, birth_fn, ps_fn, pd_fn, estimate_fn = \
+        default_phd_parameters()
     
     phd_parameters={"max_terms":100, 
                     "elim_threshold":1e-4, 
                     "merge_threshold":4}
     
-    gmphdobj = GMPHD(markov_predict_fn_handle, markov_predict_fn_parameters, 
-                     state_update_fn_handle, state_update_fn_parameters,
-                     obs_fn_handle, obs_fn_parameters,
-                     clutter_fn_handle, clutter_fn_parameters,
-                     birth_fn_handle, birth_fn_parameters,
-                     ps_fn_handle, ps_fn_parameters, 
-                     pd_fn_handle, pd_fn_parameters, 
-                     likelihood_fn_handle, likelihood_fn_parameters, 
-                     estimate_fn_handle, phd_parameters)
+    gmphdobj = GMPHD(markov_predict_fn, obs_fn, likelihood_fn, state_update_fn,
+                     clutter_fn, birth_fn, ps_fn, pd_fn, estimate_fn, 
+                     phd_parameters)
     
     estimates = []
     for obs in observations:

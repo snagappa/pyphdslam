@@ -42,45 +42,40 @@ import numpy as np
 import copy
 from phdmisctools import get_resample_index
 
+def fn_params(handle=None, parameters=None):
+    fn = (lambda:0)
+    fn.handle = handle
+    fn.parameters = parameters
+    
 
 class PHD(object):
-    def __init__(self, markov_predict_fn_handle, markov_predict_fn_parameters, 
-                 state_update_fn_handle, state_update_fn_parameters,
-                 obs_fn_handle, obs_fn_parameters, 
-                 clutter_fn_handle, clutter_fn_parameters,
-                 birth_fn_handle, birth_fn_parameters,
-                 ps_fn_handle, ps_fn_parameters, 
-                 pd_fn_handle, pd_fn_parameters, 
-                 likelihood_fn_handle, likelihood_fn_parameters, 
-                 estimate_fn_handle, 
+    def __init__(self, markov_predict_fn, obs_fn, likelihood_fn, 
+                 state_update_fn, clutter_fn, birth_fn, ps_fn, pd_fn,
+                 estimate_fn, 
                  phd_parameters={"nparticles":100,
                                  "elim_threshold":1e-3}):
         # Markov prediction
-        self.markov_predict_fn_handle = markov_predict_fn_handle
-        self.markov_predict_fn_parameters = markov_predict_fn_parameters
-        # State update functions - unused here
-        self.state_update_fn_handle = state_update_fn_handle
-        self.state_update_fn_parameters = state_update_fn_parameters
+        self.markov_predict_fn = markov_predict_fn
         # Observation function - transform from state to obs space
-        self.obs_fn_handle = obs_fn_handle
-        self.obs_fn_parameters = obs_fn_parameters
-        # Clutter function
-        self.clutter_fn_handle = clutter_fn_handle
-        self.clutter_fn_parameters = clutter_fn_parameters
-        # Birth function
-        self.birth_fn_handle = birth_fn_handle
-        self.birth_fn_parameters = birth_fn_parameters
-        # Survival function
-        self.ps_fn_handle = ps_fn_handle
-        self.ps_fn_parameters = ps_fn_parameters
-        # Detection function
-        self.pd_fn_handle = pd_fn_handle
-        self.pd_fn_parameters = pd_fn_parameters
+        self.obs_fn = obs_fn
         # Likelihood function
-        self.likelihood_fn_handle = likelihood_fn_handle
-        self.likelihood_fn_parameters = likelihood_fn_parameters
+        self.likelihood_fn = likelihood_fn
+        
+        # State update functions - unused here
+        self.state_update_fn = state_update_fn
+        # Clutter function
+        self.clutter_fn = clutter_fn
+        # Birth function
+        self.birth_fn = birth_fn
+        
+        # Survival function
+        self.ps_fn = ps_fn
+        # Detection function
+        self.pd_fn = pd_fn
+        
         # Estimator function - unused here
-        self.estimate_fn_handle = estimate_fn_handle
+        self.estimate_fn = estimate_fn
+        
         # Other PHD parameters
         self.phd_parameters = phd_parameters
         
@@ -98,9 +93,9 @@ class PHD(object):
         
     
     def phdPredict(self):
-        survival_probability = self.ps_fn_handle(self.states, self.ps_fn_parameters)
+        survival_probability = self.ps_fn.handle(self.states, self.ps_fn.parameters)
         self.weights.__imul__(survival_probability)
-        self.states = self.markov_predict_fn_handle(self.states, self.markov_predict_fn_parameters)
+        self.states = self.markov_predict_fn.handle(self.states, self.markov_predict_fn.parameters)
     
     
     def phdAppendBirth(self, birth_states, birth_weights):
@@ -114,8 +109,10 @@ class PHD(object):
 
         num_observations = len(observation_set)
         
-        detection_probability = self.pd_fn_handle(self.states, self.pd_fn_parameters)
-        clutter_pdf = [self.clutter_fn_handle(_observation_) for _observation_ in observation_set]
+        detection_probability = self.pd_fn.handle(self.states, self.pd_fn.parameters)
+        clutter_pdf = [self.clutter_fn.handle(_observation_, 
+                                              self.clutter_fn.parameters) 
+                       for _observation_ in observation_set]
         
         # Account for missed detection and duplicate the state num_obs times
         self._states_ = [copy.deepcopy(self.states) for count in range(num_observations+1)]
@@ -126,11 +123,13 @@ class PHD(object):
         
         # If the PHD is approximated with a Gaussian mixture, we need to 
         # update the state using the observations.
-        #if not (self.state_update_fn_handle is None):
-        #    new_states = [self.state_update_fn_handle(copy.deepcopy(self.states), _observation_, self.state_update_fn_parameters) for _observation_ in observation_set]
+        #if not (self.state_update_fn.handle is None):
+        #    new_states = [self.state_update_fn.handle(copy.deepcopy(self.states), _observation_, self.state_update_fn.parameters) for _observation_ in observation_set]
         
         # Evaluate the likelihood (post-update)
-        likelihood = [self.likelihood_fn_handle(_observation_, self.states, self.likelihood_fn_parameters) for _observation_ in observation_set]
+        likelihood = [self.likelihood_fn.handle(_observation_, self.states, 
+                                                self.likelihood_fn.parameters) 
+                      for _observation_ in observation_set]
         
         
         for obs_count in range(num_observations):
@@ -161,8 +160,13 @@ class PHD(object):
     
     def phdEstimate(self):
         # Select from groups of particles with sum of weights >= 0.5
-        valid_indices = np.flatnonzero(np.array([_weights_.sum() for _weights_ in self._weights_])>=0.5)
-        filter_estimates = [self.estimate_fn_handle(self._states_[vi], self._weights_[vi]) for vi in valid_indices]
+        # Use np.where instead?
+        valid_indices = np.flatnonzero(np.array([_weights_.sum() 
+                                        for _weights_ in self._weights_])>=0.5)
+        filter_estimates = [self.estimate_fn.handle(self._states_[vi], 
+                                                    self._weights_[vi],
+                                                    self.estimate_fn.parameters)
+                            for vi in valid_indices]
         return filter_estimates
         
     
