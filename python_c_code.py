@@ -222,6 +222,44 @@ void get_inverse(py::indexed_ref a, int n, py::list ainv) {
 }
 
 
+void get_inverse(py::indexed_ref a, int n, py::indexed_ref ainv) {
+    int i,j;
+    double* a_c;
+    int size = n;
+    char trans = 'N';
+    int nrhs = 1;
+    int *IPIV = new int[n+1];
+    int LWORK = n*n;
+    double *WORK = new double[LWORK];
+    int INFO;
+
+    a_c = (double *)malloc(sizeof(double)*n*n);
+    //p = (int*)malloc(sizeof(int)*n);
+    for(i=0;i<n;i++)
+       {
+       for(j=0;j<n;j++)
+         a_c[i*n+j]=a[i][j];
+       }
+       
+    // Perform the LU decomposition
+    dgetrf_(&size, &size, a_c, &size, IPIV, &INFO);
+    
+    // Compute the inverse using the LU decomposition
+    dgetri_(&size, a_c ,&size, IPIV, WORK, &LWORK, &INFO);
+    
+    // Copy the inverse to the list
+    for(i=0;i<n;i++)
+       {
+       for(j=0;j<n;j++)
+         ainv[i][j]=a_c[i*n+j];
+       }
+    
+    free(a_c);
+    delete IPIV;
+    delete WORK;
+}
+
+
 void compute_residuals(py::list x, py::list mu, py::list residuals, py::list num_residuals) {
     int num_x = x.length();
     int num_mu = mu.length();
@@ -256,43 +294,35 @@ void compute_residuals(py::list x, py::list mu, py::list residuals, py::list num
     }
 }
 
-/*
-int do_cholesky(py::indexed_ref pyA, int dims, py::indexed_ref invA) {
+int do_cholesky(py::indexed_ref pyA, int dims, py::indexed_ref cholA) {
     //copyright            : (C) 2005 by Gunter Winkler, Konstantin Kutzkow
     //email                : guwi17@gmx.de
     
     size_t size = dims;
     
-    double pr, de, sv;
-
     typedef double DBL;
     typedef ublas::row_major  ORI;
     // use dense matrix
     ublas::matrix<DBL, ORI> A (size, size);
-    ublas::matrix<DBL, ORI> T (size, size);
     ublas::matrix<DBL, ORI> L (size, size);
-
+    
     A = ublas::zero_matrix<DBL>(size, size);
-
-    ublas::vector<DBL> b (size);
-    ublas::vector<DBL> x (size);
-    ublas::vector<DBL> y (size);
-
+    L = ublas::zero_matrix<DBL>(size, size);
+    
     for(int i=0;i<size;i++) {
         for(int j=0;j<size;j++)
-            A(i, j)=pyA(i)[j];
+            A(i, j)=pyA[i][j];
     }
     
     size_t res = cholesky_decompose(A, L);
     
     for(int i=0;i<size;i++) {
         for(int j=0;j<size;j++)
-            invA[i][j]=L(i, j);
+            cholA[i][j]=L(i, j);
     }
     
     return(res);
 }
-*/
 """
 
 
@@ -574,7 +604,7 @@ class mahalanobis(c_code):
     int state_dimensions = x[0].length();
     int icnt, jcnt, st_dim_cntx, st_dim_cnty;
     
-    compute_residuals(x, mu, residuals, num_residuals);
+    compute_residuals(x, y, residuals, num_residuals);
     
     if (num_P == 1) {
         // One sigma, many residuals
@@ -602,7 +632,7 @@ class mahalanobis(c_code):
             // Many sigma, one residual
             for (int sigma_cnt=0; sigma_cnt<num_P; sigma_cnt++) {
                 outer_result = 0;
-                solve_ax_eq_b(sigma[sigma_cnt], residuals[0], a_inv_b, state_dimensions);
+                solve_ax_eq_b(P[sigma_cnt], residuals[0], a_inv_b, state_dimensions);
                 for (st_dim_cntx=0; st_dim_cntx<state_dimensions; st_dim_cntx++) {
                     outer_result += (double)residuals[0][st_dim_cntx]*(double)a_inv_b[st_dim_cntx];
                 }
@@ -613,7 +643,7 @@ class mahalanobis(c_code):
             // Many sigma, many residuals
             for (int sigma_cnt=0; sigma_cnt<num_P; sigma_cnt++) {
                 outer_result = 0;
-                solve_ax_eq_b(sigma[sigma_cnt], residuals[sigma_cnt], a_inv_b, state_dimensions, determinant);
+                solve_ax_eq_b(P[sigma_cnt], residuals[sigma_cnt], a_inv_b, state_dimensions);
                 for (st_dim_cntx=0; st_dim_cntx<state_dimensions; st_dim_cntx++) {
                     outer_result += (double)residuals[sigma_cnt][st_dim_cntx]*(double)a_inv_b[st_dim_cntx];
                 }
@@ -624,21 +654,37 @@ class mahalanobis(c_code):
     """
 
 
-class cholesky(c_code):
+class inverse(c_code):
     def __call__(self):
         return python_vars, code, support_code, libs
     python_vars = ['A', 'invA', 'dims']
     libs=['lapack','blas']
     support_code = global_support_code
     code = """
-    //do_cholesky(A[0], dims, invA[0]);
+    int num_A = A.length();
+    int state_dimensions = (int)dims;
+    int i;
+    
+    for (i=0; i<num_A; i++) {
+        get_inverse(A[i], state_dimensions, invA[i]);
+    }
+    """
+    
+
+class cholesky(c_code):
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    python_vars = ['A', 'cholA', 'dims']
+    libs=['lapack','blas']
+    support_code = global_support_code
+    code = """
+    //do_cholesky(A[0], dims, cholA[0]);
     
     //copyright            : (C) 2005 by Gunter Winkler, Konstantin Kutzkow
     //email                : guwi17@gmx.de
     
     size_t size = dims;
     
-    double pr, de, sv;
 
     typedef double DBL;
     typedef ublas::row_major  ORI;
@@ -647,7 +693,7 @@ class cholesky(c_code):
     ublas::matrix<DBL, ORI> L (size, size);
 
     ublasA = ublas::zero_matrix<DBL>(size, size);
-    
+    L = ublas::zero_matrix<DBL>(size, size);
 
     for(int i=0;i<size;i++) {
         for(int j=0;j<size;j++)
@@ -658,13 +704,95 @@ class cholesky(c_code):
     
     for(int i=0;i<size;i++) {
         for(int j=0;j<size;j++)
-            invA[i][j]=L(i, j);
+            cholA[i][j]=L(i, j);
     }
     
     //return(res);
     """
     
 
+class batch_cholesky(c_code):
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    python_vars = ['A', 'cholA', 'dims']
+    libs=['lapack','blas']
+    support_code = global_support_code
+    code = """
+    int num_A = A.length();
+    int state_dimensions = (int)dims;
+    int i;
+    
+    for (i=0; i<num_A; i++) {
+        do_cholesky(A[i], state_dimensions, cholA[i]);
+    }
+    
+    """
+    
+    
+class m_times_x(c_code):
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    python_vars = ['A', 'cholA', 'dims']
+    libs=['lapack','blas']
+    support_code = global_support_code
+    #(matrix_m, vector_x)
+    code = """
+    //(matrix_m * vector_x)
+    """
+    
+    
+
+class xt_times_m(c_code):
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    python_vars = ['A', 'cholA', 'dims']
+    libs=['lapack','blas']
+    support_code = global_support_code
+    #(matrix_m, vector_x)
+    code = """
+    //(vector_x' * matrix_m)
+    """
+    
+
+
+class m_times_m(c_code):
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    python_vars = ['A', 'cholA', 'dims']
+    libs=['lapack','blas']
+    support_code = global_support_code
+    #(matrix_m, matrix_n)
+    code = """
+    //(matrix_m, matrix_n)
+    """
+    
+
+
+class x_times_xt(c_code):
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    python_vars = ['A', 'cholA', 'dims']
+    libs=['lapack','blas']
+    support_code = global_support_code
+    #(vector_x, vector_y)
+    code = """
+    //(vector_x, vector_y)
+    """
+    
+    
+
+
+class xt_times_x(c_code):
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    python_vars = ['A', 'cholA', 'dims']
+    libs=['lapack','blas']
+    support_code = global_support_code
+    code = """
+    //(vector_x, vector_y)
+    """
+        
+    
 log_mvnpdf_code_orig = """
 int num_x = x.length();
 int num_mu = mu.length();

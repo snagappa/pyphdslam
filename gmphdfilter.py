@@ -43,10 +43,10 @@ class GMPHD(PHD):
                                     ps_fn, pd_fn, estimate_fn, phd_parameters)
         
     
-    def phdGenerateBirth(self, observation_set):
-        birth_states, birth_weights = \
-            self.birth_fn.handle(observation_set, self.birth_fn.parameters)
-        return birth_states, birth_weights
+    #def phdGenerateBirth(self, observation_set):
+    #    birth_states, birth_weights = \
+    #        self.birth_fn.handle(observation_set, self.birth_fn.parameters)
+    #    return birth_states, birth_weights
         
         
     def phdUpdate(self, observation_set):
@@ -57,12 +57,13 @@ class GMPHD(PHD):
         else:
             z_dim = 0
         
-        detection_probability = self.pd_fn.handle(self.states, 
-                                                  self.pd_fn.parameters)
-        clutter_pdf = [self.clutter_fn.handle(_observation_, 
-                                              self.clutter_fn.parameters) \
-                       for _observation_ in observation_set]
-        
+        detection_probability = self.parameters.pd_fn.handle(self.states, 
+                                            self.parameters.pd_fn.parameters)
+        #clutter_pdf = [self.clutter_fn.handle(_observation_, 
+        #                                      self.clutter_fn.parameters) \
+        #               for _observation_ in observation_set]
+        clutter_pdf = self.parameters.clutter_fn.handle(observation_set, 
+                                        self.parameters.clutter_fn.parameters)
         # Account for missed detection
         self._states_ = copy.deepcopy(self.states)
         self._weights_ = [self.weights*(1-detection_probability)]
@@ -76,26 +77,37 @@ class GMPHD(PHD):
         
         # Part of the Kalman update is common to all observation-updates
         x, P, kalman_info = kalman_update(x, P, 
-                                          self.obs_fn.parameters.H, 
-                                          self.obs_fn.parameters.R)
+                                          self.parameters.obs_fn.parameters.H, 
+                                          self.parameters.obs_fn.parameters.R, 
+                                          None, 0)
         
         # We need to update the states and find the updated weights
         for (_observation_, obs_count) in zip(observation_set, range(num_observations)):
-            new_x = copy.deepcopy(x)
+            #new_x = copy.deepcopy(x)
             # Apply the Kalman update to get the new state - update in-place
             # and return the residuals
-            residuals = kalman_update_x(new_x, kalman_info.pred_z, 
-                                        _observation_, kalman_info.kalman_gain)
+            new_x, residuals = kalman_update_x(x, kalman_info.pred_z, 
+                                        [_observation_], kalman_info.kalman_gain)
             
             # Calculate the weight of the Gaussians for this observation
             # Calculate term in the exponent
-            x_pdf = [np.exp(-0.5*(np.dot(kalman_info.inv_sqrt_S[i], 
-                                         residuals[i]).A[0]**2).sum())/ \
-                    np.sqrt(kalman_info.det_S[i]*(2*np.pi)^z_dim) 
+            if type(kalman_info.inv_sqrt_S[0]) == type(list()):
+                # If inv_sqrt_S is a list:
+                x_pdf = [np.exp(-0.5*(np.dot(kalman_info.inv_sqrt_S[i], 
+                                         residuals[i])**2).sum())/ \
+                    np.sqrt(kalman_info.det_S[i]*(2*np.pi)**z_dim) 
                     for i in range(num_x)]
+            else:
+                # otherwise, if inv_sqrt_S is a matrix:
+                x_pdf = [np.exp(-0.5*(np.dot(kalman_info.inv_sqrt_S[i], 
+                                         residuals[i]).A[0]**2).sum())/ \
+                    np.sqrt(kalman_info.det_S[i]*(2*np.pi)**z_dim) 
+                    for i in range(num_x)]
+            
+            
             new_weight = self.weights*x_pdf
             # Normalise the weights
-            new_weight.__idiv__(clutter_pdf(obs_count) + new_weight.sum())
+            new_weight.__idiv__(clutter_pdf[obs_count] + new_weight.sum())
             
             # Create new state with new_x and P to add to _states_
             self._states_ +=[[new_x[i], copy.copy(P[i])] for i in range(num_x)]
@@ -105,16 +117,16 @@ class GMPHD(PHD):
         
     
     def phdPrune(self):
-        if (self.phd_parameters['elim_threshold'] <= 0):
+        if (self.parameters.phd_parameters['elim_threshold'] <= 0):
             return
-        retain_indices = np.where(self._weights_ >= self.phd_parameters['elim_threshold'])
+        retain_indices = np.where((self._weights_ >= self.parameters.phd_parameters['elim_threshold']))[0]
         pruned_states = [self._states_[ri] for ri in retain_indices]
         pruned_weights = self._weights_[retain_indices]
         
-        if (len(pruned_states) > self.phd_parameters['max_terms']):
-            inds = np.flipud(self._weights_.argsort())
-            inds = inds[self.phd_parameters['max_terms']:]
-            phdmisctools.delete_from_list(pruned_states, inds)
+        if (len(pruned_states) > self.parameters.phd_parameters['max_terms']):
+            inds = np.flipud(pruned_weights.argsort())
+            inds = inds[self.parameters.phd_parameters['max_terms']:]
+            phdmisctools.delete_from_list(pruned_states, inds.tolist())
             pruned_weights = np.delete(pruned_weights, inds)
         
         self._states_ = pruned_states
@@ -122,7 +134,7 @@ class GMPHD(PHD):
         
     
     def phdMerge(self):
-        if (self.phd_parameters['merge_threshold'] <= 0):
+        if (self.parameters.phd_parameters['merge_threshold'] <= 0):
             return
         
         result_wt_list = []
@@ -135,9 +147,9 @@ class GMPHD(PHD):
             P_list = [tmp_states_[1] for tmp_states_ in self._states_]
             
             mahalanobis_dist = phdmisctools.mahalanobis([self._states_[max_wt_index][0]], 
-                                                        [self._states_[max_wt_index][1]], 
+                                                        [self._states_[max_wt_index][1].tolist()], 
                                                          x_list)
-            merge_list_indices = np.where(mahalanobis_dist <= self.phd_parameters['merge_threshold'])
+            merge_list_indices = np.where(mahalanobis_dist <= self.parameters.phd_parameters['merge_threshold'])[0].tolist()
             
             x_merge_list = [x_list[i] for i in merge_list_indices]
             P_merge_list = [P_list[i] for i in merge_list_indices]
@@ -158,7 +170,7 @@ class GMPHD(PHD):
     
     def phdFlattenUpdate(self):
         self.states = self._states_
-        self._weights_ = self._weights_
+        self.weights = self._weights_
     
     
     def phdEstimate(self):
@@ -178,14 +190,22 @@ class GMPHD(PHD):
         
         
     def phdIterate(self, observations):
+        # Predict existing states
         self.phdPredict()
+        # Update existing states
         self.phdUpdate(observations)
+        # Generate estimates
         estimates = self.phdEstimate()
+        # Prune low weight Gaussian components
         self.phdPrune()
-        self.phdMerge()
-        self.phdFlattenUpdate()
+        # Create birth terms from measurements
         birth_states, birth_weights = self.phdGenerateBirth(observations)
+        # Append birth terms to Gaussian mixture
         self.phdAppendBirth(birth_states, birth_weights)
+        # Merge components
+        self.phdMerge()
+        # End of iteration call
+        self.phdFlattenUpdate()
         return estimates
     
 
@@ -209,7 +229,7 @@ def kalman_predict(x, P, F, Q):
     return x_pred, P_pred
 
 
-def kalman_update(x, P, H, R, z=None):
+def kalman_update(x, P, H, R, z=None, USE_NP=1):
     num_x = len(x)
     if len(H) == 1:
         h_idx = [0]*num_x
@@ -222,11 +242,17 @@ def kalman_update(x, P, H, R, z=None):
         
     kalman_info = lambda:0
     # Evaluate inverse and determinant using Cholesky decomposition
-    sqrt_S = [np.linalg.cholesky(H[h_idx[i]]*P[i]*H[h_idx[i]].T + R[r_idx[i]]) for i in range(num_x)]
-    inv_sqrt_S = [sqrt_S[i].getI() for i in range(num_x)]
+    if USE_NP:
+        sqrt_S = [np.linalg.cholesky(H[h_idx[i]]*P[i]*H[h_idx[i]].T + R[r_idx[i]]) for i in range(num_x)]
+        inv_sqrt_S = [sqrt_S[i].getI() for i in range(num_x)]
+        inv_S = [inv_sqrt_S[i].T*inv_sqrt_S[i] for i in range(num_x)]
+    else:
+        _intermediate_sum = [H[h_idx[i]]*P[i]*H[h_idx[i]].T + R[r_idx[i]] for i in range(num_x)]
+        sqrt_S = phdmisctools.batch_cholesky(_intermediate_sum)
+        inv_sqrt_S = phdmisctools.inverse(sqrt_S)
+        inv_S = [np.dot(np.fliplr(np.rot90(inv_sqrt_S[i], -1)), inv_sqrt_S[i]) for i in range(num_x)]
     
     det_S = [np.diag(sqrt_S[i]).prod()**2 for i in range(num_x)]
-    inv_S = [inv_sqrt_S[i].T*inv_sqrt_S[i] for i in range(num_x)]
     
     # Kalman gain
     kalman_gain = [P[i]*H[h_idx[i]].T*inv_S[i] for i in range(num_x)]
@@ -236,7 +262,7 @@ def kalman_update(x, P, H, R, z=None):
     
     # Update to new state if observations were received
     if not (z is None):
-        residuals = phdmisctools._compute_residuals_(z, pred_z)
+        residuals, num_residuals = phdmisctools._compute_residuals_(z, pred_z)
         #[z - pred_z[i] for i in range(num_x)]
         x_upd = [x[i] + np.dot(kalman_gain[i], residuals[i]).A[0] for i in range(num_x)]
     else:
@@ -255,7 +281,7 @@ def kalman_update(x, P, H, R, z=None):
 
 def kalman_update_x(x, zhat, z, kalman_gain):
     num_x = len(x)
-    residuals = phdmisctools._compute_residuals_(z, zhat)
+    residuals, num_residuals = phdmisctools._compute_residuals_(z, zhat)
     #residuals = [z - zhat[i] for i in range(num_x)]
     x_upd = [x[i] + np.dot(kalman_gain[i], residuals[i]).A[0] for i in range(num_x)]
     return x_upd, residuals
@@ -271,10 +297,10 @@ def markov_predict(state, parameters):
     
     
 def uniform_clutter(z, parameters):
-    return [parameters.intensity/np.prod(np.diff(parameters.range))]*len(z)
+    return [float(parameters.intensity)/np.prod(np.diff(parameters.range))]*len(z)
     
 
-def measurement_birth(state, z, parameters):
+def measurement_birth(z, parameters):
     # Convert the observation to state space
     x = parameters.obs2state(z)
     
@@ -350,6 +376,12 @@ def default_gm_parameters():
                       "elim_threshold":1e-4, 
                       "merge_threshold":4}
     return phd_parameters
+    
+    
+def get_default_gmphd_obj_args():
+    return tuple(list(default_constant_position_model(dims=2)) +
+            list(default_phd_parameters()) + 
+            list([default_gm_parameters()]))
     
     
 def default_gmphd_obj(dims=2):

@@ -35,6 +35,9 @@ EXTRA_COMPILE_ARGS = ['-O2']
 VERBOSE = 1
 
 
+def dummyfunc(*args): pass
+
+
 def test_data(sz_n=1, sz_x=4):
     x = [np.random.rand(sz_x) for i in range(sz_n)]
     mu = [np.random.randn(sz_x) for i in range(sz_n)]
@@ -254,7 +257,7 @@ def cholesky(Amat):
     #A = [Amat]
     #invA = [np.matrix(np.empty(Amat.shape))]
     A = Amat.tolist()
-    invA = np.matrix(np.zeros(Amat.shape)).tolist()
+    cholA = np.zeros(Amat.shape).tolist()
     dims = Amat.shape[0]
     
     ccode = python_c_code.cholesky()
@@ -263,21 +266,74 @@ def cholesky(Amat):
                  compiler=COMPILER, force=FORCE_RECOMPILE, 
                  extra_compile_args=EXTRA_COMPILE_ARGS, verbose=VERBOSE)
                  #type_converters=weave.converters.blitz)
+    return cholA
+    
+    
+def batch_cholesky(A):
+    num_A = len(A)
+    dims = len(A[0])
+    A = np.array(A).tolist()
+    cholA = np.zeros((num_A,dims,dims)).tolist()
+    
+    ccode = python_c_code.batch_cholesky()
+    weave.inline(ccode.code, ccode.python_vars, 
+                 support_code=ccode.support_code, libraries=ccode.libs, 
+                 compiler=COMPILER, force=FORCE_RECOMPILE, 
+                 extra_compile_args=EXTRA_COMPILE_ARGS, verbose=VERBOSE)
+    
+    return cholA
+    
+    
+def inverse(A):
+    num_A = len(A)
+    dims = len(A[0])
+    A = np.array(A).tolist()
+    invA = np.empty((num_A,dims,dims)).tolist()
+    
+    ccode = python_c_code.inverse()
+    weave.inline(ccode.code, ccode.python_vars, 
+                 support_code=ccode.support_code, libraries=ccode.libs, 
+                 compiler=COMPILER, force=FORCE_RECOMPILE, 
+                 extra_compile_args=EXTRA_COMPILE_ARGS, verbose=VERBOSE)
+    
     return invA
     
+    
+def m_times_x(matrix_m, vector_x):
+    pass
+
+
+def xt_times_m(vector_x, matrix_m):
+    pass
+
+
+def m_times_m(matrix_m, matrix_n):
+    pass
+
+
+def x_times_xt(vector_x, vector_y):
+    pass
+
+
+def xt_times_x(vector_x, vector_y):
+    pass
+
     
 def merge_states(wt, x, P):
     num_x = len(x)
     merged_wt = wt.sum()
     merged_x = np.sum([x[i]*wt[i] for i in range(num_x)], 0)/merged_wt
-    residuals = _compute_residuals_(x, [merged_x])
-    merged_P = sum([wt[i]*(P[i] + np.dot(np.matrix(residuals[i]).T, np.matrix(residuals[i])) for i in range(num_x))], 0)/merged_wt
+    residuals, num_residuals = _compute_residuals_(x, [merged_x])
+    merged_P = sum([wt[i]*(P[i] + np.dot(np.matrix(residuals[i]).T, np.matrix(residuals[i]))) for i in range(num_x)], 0)/merged_wt
     return merged_wt, merged_x, merged_P
     
     
 def delete_from_list(x, indices):
-    indices.sort()
-    indices.reverse()
+    #if type(indices) == type(list()):
+    #    indices.sort(reverse=True)
+    #else:
+    #    indices = np.sort(indices)[::-1]
+    indices.sort(reverse=True)
     [x.__delitem__(idx) for idx in indices]
     
     
@@ -308,7 +364,7 @@ def kalman_update(x, P, H, R, z=None):
     
     # Update to new state if observations were received
     if not (z is None):
-        residuals = phdmisctools._compute_residuals_(z, pred_z)
+        residuals = _compute_residuals_(z, pred_z)
         #[z - pred_z[i] for i in range(num_x)]
         x_upd = [x[i] + np.dot(kalman_gain[i], residuals[i]).A[0] for i in range(num_x)]
     else:

@@ -1,6 +1,85 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 from scipy import weave
+import phdslam
+
+import gmphdfilter
+import phdmisctools
+
+def test_slam_feature(num_x=5, dim_x=2):
+    x, mu, P = phdmisctools.test_data(num_x, dim_x)
+    states = [[x[i], P[i]] for i in range(num_x)]
+    weights = np.random.rand(num_x)
+    
+    default_args = gmphdfilter.get_default_gmphd_obj_args()
+    slam_feature = phdslam.GMPHD_SLAM_FEATURE(*default_args)
+    # Disable birth
+    slam_feature.birth_fn.handle = None
+    slam_feature.init(states, weights)
+    slam_feature.phdIterate(mu)
+    return slam_feature
+
+
+
+
+
+
+def _compute_residuals_(x, mu):
+    num_x = len(x)
+    num_mu = len(mu)
+    state_dimensions = len(mu[0])
+    if num_x == 1:
+        residuals = np.array([np.empty(state_dimensions, dtype=np.float64) for i in range(num_mu)])
+    else:
+        residuals = np.array([np.empty(state_dimensions, dtype=np.float64) for i in range(num_x)])
+    num_residuals = [0];
+    python_vars = ['x', 'mu', 'residuals', 'num_residuals']
+    
+    code2 = """
+    int num_x = Nx[0];
+    int num_mu = Nmu[0];
+    
+    int state_dimensions = Nmu[1];
+    int icnt, jcnt;
+    
+    
+    // Compute the residuals
+    if (num_x == 1) {
+        for (icnt=0; icnt<num_mu; icnt++) {
+            for (jcnt=0; jcnt<state_dimensions; jcnt++) {
+                residuals(icnt,jcnt) = x(0, jcnt)-mu(icnt,jcnt);
+            }
+        }
+        num_residuals[0] = num_mu;
+    }
+    else if (num_mu == 1) {
+        for (icnt=0; icnt<num_x; icnt++) {
+            for (jcnt=0; jcnt<state_dimensions; jcnt++) {
+                residuals(icnt,jcnt) = x(icnt,jcnt)-mu(0,jcnt);
+            }
+        }
+        num_residuals[0] = num_x;
+    }
+    else {
+        for (icnt=0; icnt<num_x; icnt++) {
+            for (jcnt=0; jcnt<state_dimensions; jcnt++) {
+                residuals(icnt,jcnt) = x(icnt,jcnt)-mu(icnt,jcnt);
+            }
+        }
+        num_residuals[0] = num_x;
+    }
+    
+    """
+    weave.inline(code2, python_vars, type_converters=weave.converters.blitz)
+    return residuals, num_residuals[0]
+
+
+
+
+
+
+
+
 
 code = """
 double t[4];
