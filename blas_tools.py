@@ -12,6 +12,16 @@ import blas_tools_c_code
 import phdmisctools
 #import collections
 
+
+default_dtype = np.float32
+
+def array(*args, **kw):
+    if 'dtype' not in kw.keys():
+        return np.array(*args, dtype=default_dtype, **kw)
+    else:
+        return np.array(*args, **kw) 
+
+
 global_support_code = """
 #include <atlas/cblas.h>
 #include <atlas/clapack.h>
@@ -47,6 +57,8 @@ int clapack_dtrtri(const enum ATLAS_ORDER Order,const enum ATLAS_UPLO Uplo,
 
 #ITIS = collections.namedtuple('ITIS', ['valid', 'type', 'ndims', 'shape'])
 LIST_OF_NDARRAY = "LIST_OF_NDARRAY"
+LIST_OF_MATRIX = "LIST_OF_MATRIX"
+
 class ITIS(object):
     def __init__(self, _valid, _type, _ndims, _shape, _base_type):
         self.valid = _valid
@@ -64,21 +76,29 @@ class ITIS(object):
         _type = np.array(self.type)
         if np.all([self.type[i] == np.ndarray for i in range(len(self.type))]):
             return np.ndarray
+        if np.all([self.type[i] == np.matrix for i in range(len(self.type))]):
+            return np.matrix
         elif all(_type==list):
             return list
         elif (self.type[0] == list) and np.all([self.type[i] == np.ndarray for i in range(1,len(self.type))]):
             return LIST_OF_NDARRAY
+        elif (self.type[0] == list) and np.all([self.type[i] == np.matrix for i in range(1,len(self.type))]):
+            return LIST_OF_MATRIX
         else:
             return None
 
 def whatisit(arr):
-    if type(arr) is np.ndarray:
+    if type(arr) == np.ndarray:
         if arr.dtype == object:
             itis = ITIS(False, [np.ndarray], len(arr.shape), arr.shape, arr.dtype)
             return itis
-        
         return ITIS(True, [np.ndarray], len(arr.shape), arr.shape, arr.dtype)
-    elif type(arr) is list:
+    elif type(arr) == np.matrix:
+        if arr.dtype == object:
+            itis = ITIS(False, [np.matrix], len(arr.shape), arr.shape, arr.dtype)
+            return itis
+        return ITIS(True, [np.matrix], len(arr.shape), arr.shape, arr.dtype)
+    elif type(arr) == list:
         itis = ITIS(True, [list], 1, (len(arr),), None)
         sub_arr = whatisit(arr[0])
         itis.valid &= sub_arr.valid
@@ -192,27 +212,35 @@ def dgemv(A, x, alpha=1.0, beta=0.0, y=None, TRANSPOSE_A=False):
         
     elif A_consistent_type == np.ndarray:
         y = zeros(y_is)
+        assert A.flags.c_contiguous or A.flags.f_contiguous, "blas_tools.dgemv may only be used with contiguous data"
+        C_CONTIGUOUS = A.flags.c_contiguous
         weave.inline(blas_tools_c_code.npdgemv.code, 
                      blas_tools_c_code.npdgemv.python_vars, 
                      libraries=blas_tools_c_code.npdgemv.libraries,
                      support_code=blas_tools_c_code.npdgemv.support_code,
                      extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
                      
-    elif A_consistent_type == LIST_OF_NDARRAY:
+    """
+    elif A_consistent_type in [LIST_OF_NDARRAY, LIST_OF_MATRIX]:
+        assert A.flags.c_contiguous or A.flags.f_contiguous, "blas_tools.dgemv may only be used with contiguous data"
+        
         y_is.consistent_type = np.ndarray
         y = zeros(y_is)
+        x = np.array(x)
         weave.inline(blas_tools_c_code.npdgemv.code, 
                      blas_tools_c_code.npdgemv.python_vars, 
                      libraries=blas_tools_c_code.npdgemv.libraries,
                      support_code=blas_tools_c_code.npdgemv.support_code,
                      extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
         y = [y[i] for i in range(len(y))]
+    """
     return y
     
     
-def test_dgemv(num_elements=1000, num_dims=4):
+def test_dgemv(num_elements=1000, num_dims=4, num_rows=4):
     print "Case 1: num_P == num_x"
-    x, mu, P = phdmisctools.test_data(num_elements, num_dims)
+    x = np.random.rand(num_elements, num_dims)
+    P = np.random.rand(num_elements, num_dims, num_rows)
     # Using numpy only
     np_result = np.array([np.dot(P[i], x[i]) for i in range(num_elements)]).squeeze()
     # Using dgemv with numpy style arrays
@@ -228,8 +256,8 @@ def test_dgemv(num_elements=1000, num_dims=4):
     
     
     print "Case 2: num_P == 1"
-    x, mu, P = phdmisctools.test_data(num_elements, num_dims)
-    P = [P[0]]
+    x = np.random.rand(num_elements, num_dims)
+    P = np.random.rand(1, num_dims, num_rows)
     # Using numpy only
     np_result = np.array([np.dot(P[0], x[i]) for i in range(num_elements)]).squeeze()
     # Using dgemv with numpy style arrays
@@ -245,8 +273,8 @@ def test_dgemv(num_elements=1000, num_dims=4):
     
     
     print "Case 3: num_x == 1"
-    x, mu, P = phdmisctools.test_data(num_elements, num_dims)
-    x = [x[0]]
+    x = np.random.rand(1, num_dims)
+    P = np.random.rand(num_elements, num_dims, num_rows)
     # Using numpy only
     np_result = np.array([np.dot(P[i], x[0]) for i in range(num_elements)]).squeeze()
     # Using dgemv with numpy style arrays

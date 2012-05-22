@@ -70,11 +70,63 @@ class lcopy:
                     y[i][j][k] = x[i][j][k];
     """
     
+
+# dsdot -- inner product of two vectors
+
+
+# ddot -- dot product of two vectors
+
+
+# dnrm2 -- Euclidean norm of a vector
+
+
+# dasum -- sum of absolute values
+
+
+# idamax -- find index of element having the max absolute value
+
+
+# daxpy -- y = ax+y
+class daxpy:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = global_support_code
+    libraries = ["blas", "lapack"]
+    python_vars = ["alpha", "x", "y"]
+    code = """
+    int inc;
+    int num_x;
+    
+    inc = 1;
+    num_x = Nx[0];
+    daxpy_(&num_x, &alpha, x, &inc, y, &inc);
+    """
+    
+
+# dscal -- x = ax
+class dscal:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = global_support_code
+    libraries = ["blas", "lapack"]
+    python_vars = ["alpha", "x"]
+    code = """
+    int inc;
+    int num_x;
+    
+    inc = 1;
+    num_x = Nx[0];
+    dscal_(&num_x, &alpha, x, &inc);
+    """
+
+
+###############################################################################
+# dgemv -- y = alpha*A*x + beta*y OR y = alpha*A**T*x + beta*y
 class ldgemv:
     def __call__(self):
         return python_vars, code, support_code, libs
     support_code = global_support_code
-    libraries = ["cblas", "lapack"]
+    libraries = ["blas", "atlas", "lapack"]
     python_vars = ["A", "x", "y", "A_shape", "x_shape", "alpha", "beta", "TRANSPOSE_A"]
     code = """
     int i, j, k, inc;
@@ -88,9 +140,12 @@ class ldgemv:
     CBLAS_TRANSPOSE transA;
     char f_transA;
     
+    // Row major is always true, so transpose should be inverted
     order = CblasRowMajor;
     transA = (int)TRANSPOSE_A>0? CblasTrans : CblasNoTrans;
-    f_transA = (int)TRANSPOSE_A>0? 't' : 'n';
+    // if Fortran ordering
+    //f_transA = (int)TRANSPOSE_A>0? 't' : 'n';
+    f_transA = (int)TRANSPOSE_A>0? 'n' : 't';
     
     inc = 1;
     num_A = (int)A_shape[0];
@@ -145,8 +200,8 @@ class npdgemv:
     def __call__(self):
         return python_vars, code, support_code, libs
     support_code = global_support_code
-    libraries = ["cblas", "lapack", "blas", "atlas"]
-    python_vars = ["A", "x", "y", "alpha", "beta", "TRANSPOSE_A"]
+    libraries = ["blas", "lapack"]
+    python_vars = ["A", "x", "y", "alpha", "beta", "TRANSPOSE_A", "C_CONTIGUOUS"]
     code = """
     int i, j, k, base_offset, inc;
     int num_A, num_x;
@@ -157,7 +212,13 @@ class npdgemv:
     
     order = CblasRowMajor;
     transA = (int)TRANSPOSE_A>0? CblasTrans : CblasNoTrans;
-    f_transA = (int)TRANSPOSE_A>0? 't' : 'n';
+    
+    // Row major
+    if ((int)C_CONTIGUOUS)
+        f_transA = (int)TRANSPOSE_A>0? 'n' : 't';
+    // Column major (Fortran)
+    else
+        f_transA = (int)TRANSPOSE_A>0? 't' : 'n';
     
     inc = 1;
     num_A = NA[0];
@@ -174,15 +235,44 @@ class npdgemv:
     }
     else if (num_A == 1) {
         for (i=0; i<num_x; i++)
-            //cblas_dgemv(order, transA, nrows, ncols, alpha, A, nrows, x+(i*ncols), 1, beta, y+(i*ncols));
+            //cblas_dgemv(order, transA, nrows, ncols, alpha, A, nrows, x+(i*ncols), 1, beta, y+(i*ncols), 1);
             dgemv_(&f_transA, &nrows, &ncols, &alpha, A, &nrows, x+(i*ncols), &inc, &beta, y+(i*ncols), &inc);
     }
     else if (num_x == 1) {
         for (i=0; i<num_A; i++)
-            //cblas_dgemv(order, transA, nrows, ncols, alpha, A+(i*base_offset), nrows, x, 1, beta, y+(i*ncols));
+            //cblas_dgemv(order, transA, nrows, ncols, alpha, A+(i*base_offset), nrows, x, 1, beta, y+(i*ncols), 1);
             dgemv_(&f_transA, &nrows, &ncols, &alpha, A+(i*base_offset), &nrows, x, &inc, &beta, y+(i*ncols), &inc);
     }
     else {
         exception_occured = 1;
     }
     """
+
+# dsymv -- y = alpha*A*x + beta*y, A is symmetric
+
+
+# dger -- rank 1 operation, A = alpha*x*y**T + A
+
+
+# dsyr -- symmetric rank 1 operation, A = alpha*x*x**T + A
+
+
+# dsyr2 -- symmetric rank 2 operation, A = alpha*x*y**T + alpha*y*x**T + A
+
+
+
+## Level 3 BLAS
+
+# dgemm -- matrix-matrix operation, C := alpha*op( A )*op( B ) + beta*C,
+#           where  op( X ) is one of
+#           op( X ) = X   or   op( X ) = X**T
+
+
+# dsymm -- matrix-matrix operation, A is symmetric
+#           C := alpha*A*B + beta*C, or
+#           C := alpha*B*A + beta*C
+
+
+# dsyrk -- symmetric rank k operation, C is symmetric
+#           C := alpha*A*A**T + beta*C, or
+#           C := alpha*A**T*A + beta*C
