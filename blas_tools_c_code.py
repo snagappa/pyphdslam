@@ -5,8 +5,33 @@ Created on Sun May 20 19:05:54 2012
 @author: snagappa
 """
 
-EXTRA_COMPILE_ARGS = ["-O3"]
+EXTRA_COMPILE_ARGS = ["-g -fopenmp"]
+lopenblas = ["openblas"]
+lblas = ["blas"]
+lgsl = ["gsl"]
+llapack = ["lapack"]
+lptf77blas = ["ptf77blas"]+llapack
+lgomp = ["gomp"]
 
+omp_headers = """
+#include <omp.h>
+"""
+
+omp_code = """
+    int nthreads, tid;
+    #pragma omp parallel private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_x, vec_len, alpha, alpha_offset, x, inc, y, nthreads) private(i, tid)
+    """
+    
 gsl_blas_headers = """
 #include <gsl/gsl_blas.h>
 #include <gsl/gsl_vector.h>
@@ -54,13 +79,12 @@ inline void copylist2d(double *A, int nrows, int ncols, py::indexed_ref A_copy) 
             A_copy[i][j] = A[i*ncols + j];
 }
 
-
 """
 
 class lcopy:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = global_support_code
+    support_code = f77_blas_headers
     libraries = ["cblas", "lapack"]
     python_vars = ["x", "y", "itis"]
     code = """
@@ -89,13 +113,15 @@ class lcopy:
 class ddot:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = f77_blas_headers
-    libraries = ["blas", "lapack", "gsl"]
+    support_code = f77_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp
     python_vars = ["x", "y","xt_dot_y"]
     code = """
     int i, num_x, num_y, max_num;
     int vec_len, x_offset, y_offset, inc;
     //gsl_vector_view gsl_x, gsl_y;
+    int nthreads, tid;
+    
     inc = 1;
     num_x = Nx[0];
     vec_len = Nx[1];
@@ -105,6 +131,17 @@ class ddot:
     x_offset = num_x==1?0:vec_len;
     y_offset = num_y==1?0:vec_len;
     
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(max_num, xt_dot_y, vec_len, x, x_offset, inc, y, y_offset) private(i)
     for (i=0; i<max_num; i++) {
         //gsl_x = gsl_vector_view_array(x+(i*x_offset), vec_len);
         //gsl_y = gsl_vector_view_array(y+(i*y_offset), vec_len);
@@ -119,17 +156,29 @@ class ddot:
 class dnrm2:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = global_support_code
-    libraries = ["blas", "lapack"]
+    support_code = f77_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp
     python_vars = ["x", "nrm2"]
     code = """
     int i, num_x;
     int vec_len, inc;
+    int nthreads, tid;
     
     inc = 1;
     num_x = Nx[0];
     vec_len = Nx[1];
     
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_x, nrm2, vec_len, x, inc) private(i)
     for (i=0; i<num_x;i++)
         nrm2[i] = dnrm2_(&vec_len, x+(i*vec_len), &inc);
     """
@@ -140,17 +189,29 @@ class dnrm2:
 class dasum:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = f77_blas_headers
-    libraries = ["blas", "lapack"]
+    support_code = f77_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp
     python_vars = ["x", "asum"]
     code = """
     int i, num_x;
     int vec_len, inc;
+    int nthreads, tid;
     
     inc = 1;
     num_x = Nx[0];
     vec_len = Nx[1];
     
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_x, asum, vec_len, x, inc) private(i)
     for (i=0; i<num_x;i++)
         asum[i] = dasum_(&vec_len, x+(i*vec_len), &inc);
     """
@@ -160,17 +221,29 @@ class dasum:
 class idamax:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = f77_blas_headers
-    libraries = ["blas", "lapack"]
+    support_code = f77_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp
     python_vars = ["x", "max_idx"]
     code = """
     int i, num_x;
     int vec_len, inc;
+    int nthreads, tid;
     
     inc = 1;
     num_x = Nx[0];
     vec_len = Nx[1];
     
+    #pragma omp parallel private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_x, max_idx, vec_len, x, inc) private(i)
     for (i=0; i<num_x;i++)
         max_idx[i] = idamax_(&vec_len, x+(i*vec_len), &inc);
     """
@@ -180,34 +253,49 @@ class idamax:
 class daxpy:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = f77_blas_headers
-    libraries = ["blas", "lapack"]
+    support_code = f77_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp
     python_vars = ["alpha", "x", "y"]
     code = """
     int i, num_x, num_alpha;
     int vec_len, x_offset, alpha_offset, inc;
+    int nthreads, tid;
     
     inc = 1;
     num_x = Nx[0];
     vec_len = Nx[1];
     num_alpha = Nalpha[0];
     alpha_offset = !(num_alpha==1);
-        
-    for (i=0; i<num_x;i++)
+    
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_x, vec_len, alpha, alpha_offset, x, inc, y) private(i)
+    for (i=0; i<num_x;i++) {
         daxpy_(&vec_len, alpha+(i*alpha_offset), x+(i*vec_len), &inc, y+(i*vec_len), &inc);
+    }
+    
     """
     
-
+        
 # dscal -- x = ax
 class dscal:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = f77_blas_headers
-    libraries = ["blas", "lapack"]
+    support_code = f77_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp
     python_vars = ["alpha", "x"]
     code = """
     int i, num_x, num_alpha;
     int vec_len, x_offset, alpha_offset, inc;
+    int nthreads, tid;
     
     inc = 1;
     num_x = Nx[0];
@@ -215,6 +303,18 @@ class dscal:
     num_alpha = Nalpha[0];
     
     alpha_offset = !(num_alpha==1);
+    
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_x, vec_len, alpha, alpha_offset, x, inc) private(i)
     for (i=0; i<num_x;i++)
         dscal_(&vec_len, alpha+(i*alpha_offset), x+(i*vec_len), &inc);
     """
@@ -231,21 +331,46 @@ class dscal:
 class dgemv:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = f77_blas_headers
-    libraries = ["blas", "lapack"]
+    support_code = f77_blas_headers+omp_headers
+    libraries = lptf77blas+llapack+lgomp
     python_vars = ["A", "x", "y", "alpha", "beta", "TRANSPOSE_A", "C_CONTIGUOUS"]
     code = """
     int i, num_A, num_x, num_alpha, num_beta, max_num;
-    int A_offset, x_offset, alpha_offset, beta_offset, inc;
-    int nrows, ncols;
+    int A_offset, x_offset, alpha_offset, beta_offset, y_offset, inc;
+    int nrows, ncols, lda;
     char f_transA;
+    int nthreads, tid;
     
     // Row major
-    if ((int)C_CONTIGUOUS)
-        f_transA = (int)TRANSPOSE_A>0? 'n' : 't';
+    if ((int)C_CONTIGUOUS) {
+        if (!(int)TRANSPOSE_A) {
+            f_transA = 't';
+            nrows = NA[2];
+            ncols = NA[1];
+            y_offset = NA[1];
+        }
+        else {
+            f_transA = 'n';
+            nrows = NA[2];
+            ncols = NA[1];
+            y_offset = NA[2];
+        }
+    }
+    /*
     // Column major (Fortran)
-    else
-        f_transA = (int)TRANSPOSE_A>0? 't' : 'n';
+    else {
+        nrows = NA[1];
+        ncols = NA[2];
+        if (!(int)TRANSPOSE_A) {
+            f_transA = 'n';
+            y_offset = nrows;
+        }
+        else {
+            f_transA = 't';
+            y_offset = ncols;
+        }
+    }
+    */
     
     inc = 1;
     num_A = NA[0];
@@ -253,19 +378,33 @@ class dgemv:
     num_alpha = Nalpha[0];
     num_beta = Nbeta[0];
     
-    nrows = NA[1];
-    ncols = NA[2];
+    
     
     A_offset = num_A==1?0:nrows*ncols;
-    x_offset = num_x==1?0:ncols;
+    x_offset = num_x==1?0:Nx[1];
     alpha_offset = !(num_alpha==1);
     beta_offset = !(num_beta==1);
-    
     max_num = num_A>num_x?num_A:num_x;
+    
+    
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    //std::cout << "nrows=" << nrows <<" ncols="<< ncols << " A_offset=" << A_offset <<" x_offset=" << x_offset << " alpha_offset=" << alpha_offset << " beta_offset=" << beta_offset << " y_offset=" << y_offset << std::endl;
+    
+    #pragma omp parallel for \
+        shared(max_num, f_transA, nrows, ncols, alpha, alpha_offset, A, A_offset, x, x_offset, inc, beta, beta_offset, y) private(i)
     for (i=0; i<max_num; i++)
         dgemv_(&f_transA, &nrows, &ncols, alpha+(i*alpha_offset), 
                A+(i*A_offset), &nrows, x+(i*x_offset), &inc, beta+(i*beta_offset), 
-               y+(i*ncols), &inc);
+               y+(i*y_offset), &inc);
+    
     """
 
 
@@ -278,8 +417,8 @@ class dgemv:
 class dger:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = gsl_blas_headers
-    libraries = ["blas", "lapack", "gsl"]
+    support_code = gsl_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
     python_vars = ["A", "x", "y", "alpha"]
     code = """
     // A is stored in row major order and there is no option to transpose so we 
@@ -290,6 +429,7 @@ class dger:
     gsl_matrix_view gsl_A;
     gsl_vector_view gsl_x;
     gsl_vector_view gsl_y;
+    int nthreads, tid;
     
     inc = 1;
     num_x = Nx[0];
@@ -307,7 +447,17 @@ class dger:
     alpha_offset = !(num_alpha==1);
     A_offset = nrows*ncols;
     
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
     
+    #pragma omp parallel for \
+        shared(num_A, A, A_offset, nrows, ncols, x, x_offset, x_vec_len, y, y_offset, y_vec_len, alpha, alpha_offset) private(i, gsl_A, gsl_x, gsl_y)
     for (i=1; i<num_A; i++) {
         gsl_A = gsl_matrix_view_array(A+(i*A_offset), nrows, ncols);
         gsl_x = gsl_vector_view_array(x+(i*x_offset), x_vec_len);
@@ -339,13 +489,14 @@ class dger:
 class dgemm:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = global_support_code
-    libraries = ["blas", "lapack", "gsl"]
+    support_code = f77_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
     python_vars = ["A", "B", "C", "alpha", "beta"]
     code = """
     int i, num_A, num_B, num_C, num_alpha, num_beta;
     int A_rows, A_cols, B_rows, B_cols, C_rows, C_cols;
     int A_offset, B_offset, C_offset, alpha_offset, beta_offset;
+    int nthreads, tid;
     
     num_A = NA[0]; A_rows = NA[1]; A_cols = NA[2];
     num_B = NB[0]; B_rows = NB[1]; B_cols = NB[2];
@@ -359,6 +510,17 @@ class dgemm:
     alpha_offset = !(num_alpha==1);
     beta_offset = !(num_beta==1);
     
+    #pragma omp parallel private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_C, A, A_offset, A_rows, A_cols, B, B_offset, B_rows, B_cols, C, C_offset, C_rows, C_cols, TransA, TransB, alpha, alpha_offset, beta, beta_offset) private(i, gsl_A, gsl_B, gsl_C)
     for (i=0; i<num_C; i++) {
         gsl_A = gsl_matrix_view_array(A+(i*A_offset), A_rows, A_cols);
         gsl_B = gsl_matrix_view_array(B+(i*B_offset), B_rows, B_cols);
@@ -386,7 +548,7 @@ class dgemm:
 class ldgemv:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = global_support_code
+    support_code = f77_blas_headers
     libraries = ["blas", "atlas", "lapack"]
     python_vars = ["A", "x", "y", "A_shape", "x_shape", "alpha", "beta", "TRANSPOSE_A"]
     code = """
@@ -460,7 +622,7 @@ class ldgemv:
 class npdgemv_old_plus_broken_code_now:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = global_support_code
+    support_code = f77_blas_headers
     libraries = ["blas", "lapack"]
     python_vars = ["A", "x", "y", "alpha", "beta", "TRANSPOSE_A", "C_CONTIGUOUS"]
     code = """

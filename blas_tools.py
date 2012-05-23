@@ -285,7 +285,8 @@ def daxpy(alpha, x, y=None):
                  blas_tools_c_code.daxpy.python_vars, 
                  libraries=blas_tools_c_code.daxpy.libraries,
                  support_code=blas_tools_c_code.daxpy.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS,
+                 verbose=1)
     return fn_return_val
     
     
@@ -313,7 +314,10 @@ def dgemv(A, x, alpha=1.0, y=None, beta=1.0, TRANSPOSE_A=False):
         assert_valid_vector(x, "x")
     fn_return_val = None
     if y==None:
-        y = np.zeros(((max([A.shape[0],x.shape[0]]),) + x.shape[1:]))
+        if not TRANSPOSE_A:
+            y = np.zeros(((max([A.shape[0],x.shape[0]]),) + (A.shape[1],)))
+        else:
+            y = np.zeros(((max([A.shape[0],x.shape[0]]),) + (A.shape[2],)))
         fn_return_val = y
     if DEBUG:
         assert_valid_vector(y, "y")
@@ -323,18 +327,17 @@ def dgemv(A, x, alpha=1.0, y=None, beta=1.0, TRANSPOSE_A=False):
     if np.isscalar(beta):
         beta = np.array([beta], dtype=float)
     if DEBUG:
-        assert_valid_vector(alpha, "alpha")
-        assert_valid_vector(beta, "beta")
-        assert len(alpha) in [1, x.shape[0]], "alpha must be a scalar or have same length as x"
+        assert len(alpha) in [1, x.shape[0], A.shape[0]], "alpha must be a scalar or a numpy array of same length as x or A"
         assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1) or (A.shape[0]==1), "incompatible sizes for A and x specified"
         assert A.shape[2] == x.shape[1], "x must have as many elements as columns in A"
-        assert len(beta) in [1, y.shape[0]], "beta must be a scalar or have same length as y"
+        assert len(beta) in [1, y.shape[0]], "beta must be a scalar or a numpy array of same length as y"
     C_CONTIGUOUS = A.flags.c_contiguous
     weave.inline(blas_tools_c_code.dgemv.code, 
                  blas_tools_c_code.dgemv.python_vars, 
                  libraries=blas_tools_c_code.dgemv.libraries,
                  support_code=blas_tools_c_code.dgemv.support_code,
                  extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+                 
     return fn_return_val
     
     
@@ -511,6 +514,7 @@ def test_daxpy(num_elements=1000, num_dims=4):
     daxpy(a, x, y)
     max_err = max(abs(np.abs(np_axpy-y.flatten())))
     print "Max error = ", max_err
+    #assert max_err < 1e-12, "Error exceeds 1e-12"
     
 def test_dscal(num_elements=1000, num_dims=4):
     print "Computing dot product..."
@@ -524,53 +528,44 @@ def test_dscal(num_elements=1000, num_dims=4):
     print "Max error = ", max_err
 
 def test_dgemv(num_elements=1000, num_dims=4, num_rows=4):
-    print "Case 1: num_P == num_x"
+    print "Case 1a: num_P == num_x"
     x = np.random.rand(num_elements, num_dims)
-    P = np.random.rand(num_elements, num_dims, num_rows)
+    P = np.random.rand(num_elements, num_rows, num_dims)
     # Using numpy only
     np_result = np.array([np.dot(P[i], x[i]) for i in range(num_elements)]).squeeze()
     # Using dgemv with numpy style arrays
     np_dgemv_result = dgemv(np.array(P), np.array(x))
-    # Using dgemv with lists
-    list_dgemv_result = np.array(dgemv(np.array(P).tolist(), np.array(x).tolist()))
-    
     max_err1 = np.max(np.abs(np_result - np_dgemv_result))
-    max_err2 = np.max(np.abs(np_result - list_dgemv_result))
-    
     print "Maximum error = ", max_err1, " for np_arrays"
-    print "Maximum error = ", max_err2, " for lists"
     
+    print "Case 1b: num_P == num_x with transpose"
+    x = np.random.rand(num_elements, num_dims)
+    P = np.random.rand(num_elements, num_dims, num_rows)
+    # Using numpy only
+    np_result = np.array([np.dot(P[i].T, x[i]) for i in range(num_elements)]).squeeze()
+    # Using dgemv with numpy style arrays
+    np_dgemv_result = dgemv(np.array(P), np.array(x), TRANSPOSE_A=True)
+    max_err1 = np.max(np.abs(np_result - np_dgemv_result))
+    print "Maximum error = ", max_err1, " for np_arrays"
     
     print "Case 2: num_P == 1"
     x = np.random.rand(num_elements, num_dims)
-    P = np.random.rand(1, num_dims, num_rows)
+    P = np.random.rand(1, num_rows, num_dims)
     # Using numpy only
     np_result = np.array([np.dot(P[0], x[i]) for i in range(num_elements)]).squeeze()
     # Using dgemv with numpy style arrays
     np_dgemv_result = dgemv(np.array(P), np.array(x))
-    # Using dgemv with lists
-    list_dgemv_result = np.array(dgemv(np.array(P).tolist(), np.array(x).tolist()))
-    
     max_err1 = np.max(np.abs(np_result - np_dgemv_result))
-    max_err2 = np.max(np.abs(np_result - list_dgemv_result))
-    
     print "Maximum error = ", max_err1, " for np_arrays"
-    print "Maximum error = ", max_err2, " for lists"
-    
     
     print "Case 3: num_x == 1"
     x = np.random.rand(1, num_dims)
-    P = np.random.rand(num_elements, num_dims, num_rows)
+    P = np.random.rand(num_elements, num_rows, num_dims)
     # Using numpy only
     np_result = np.array([np.dot(P[i], x[0]) for i in range(num_elements)]).squeeze()
     # Using dgemv with numpy style arrays
     np_dgemv_result = dgemv(np.array(P), np.array(x))
-    # Using dgemv with lists
-    list_dgemv_result = np.array(dgemv(np.array(P).tolist(), np.array(x).tolist()))
-    
     max_err1 = np.max(np.abs(np_result - np_dgemv_result))
-    max_err2 = np.max(np.abs(np_result - list_dgemv_result))
-    
     print "Maximum error = ", max_err1, " for np_arrays"
-    print "Maximum error = ", max_err2, " for lists"
+    
     
