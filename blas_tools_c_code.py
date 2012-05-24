@@ -38,6 +38,13 @@ gsl_blas_headers = """
 #include <gsl/gsl_matrix.h>
 
 """
+
+gsl_la_headers = """
+#include <gsl/gsl_linalg.h>
+
+"""
+
+
 f77_blas_headers = """
 #include <atlas/cblas.h>
 #include <atlas/clapack.h>
@@ -334,8 +341,56 @@ class dgemv:
         return python_vars, code, support_code, libs
     support_code = f77_blas_headers+omp_headers
     libraries = lptf77blas+llapack+lgomp
-    python_vars = ["A", "x", "y", "alpha", "beta", "TRANSPOSE_A", "C_CONTIGUOUS"]
+    python_vars = ["A", "x", "y", "alpha", "beta", "TRANSPOSE_A"]
     code = """
+    int i, num_A, num_x, num_alpha, num_beta;
+    int nrows, ncols, A_offset, x_offset, x_vec_len, alpha_offset, beta_offset, y_offset, y_vec_len;
+    CBLAS_TRANSPOSE_t TransA;
+    gsl_matrix_view gsl_A;
+    gsl_vector_view gsl_x, gsl_y;
+    int nthreads, tid;
+    
+    num_A = NA[0];
+    num_x = Nx[0];
+    num_alpha = Nalpha[0];
+    num_beta = Nbeta[0];
+    num_y = Ny[0]
+    
+    A_offset = num_A==1?0:nrows*ncols;
+    x_offset = num_x==1?0:Nx[1];
+    alpha_offset = !(num_alpha==1);
+    beta_offset = !(num_beta==1);
+    TransA = (int)TRANSPOSE_A?CblasTrans:CblasNoTrans;
+    if (!TRANSPOSE_A) {
+        TransA = CblasNoTrans;
+        y_offset = nrows;
+    }
+    else {
+        TransA = CblasTrans;
+        y_offset = ncols;
+    }
+    
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_y, A, A_offset, nrows, ncols, x, x_offset, x_vec_len, y, y_offset, y_vec_len, alpha, alpha_offset, beta, beta_offset, y) private(i, gsl_A, gsl_x, gsl_y)
+    for (i=0; i<num_y; i++) {
+        gsl_A = gsl_matrix_view_array(A+(i*A_offset), nrows, ncols);
+        gsl_x = gsl_vector_view_array(x+(i*x_offset), x_vec_len);
+        gsl_y = gsl_vector_view_array(y+(i*y_offset), y_vec_len);
+        gsl_blas_dgemv (TransA, alpha[i*alpha_offset], &A.matrix, &x.vector, 
+                        beta[i*beta_offset], &y.vector);
+    }
+    """
+    old_python_vars = ["A", "x", "y", "alpha", "beta", "TRANSPOSE_A", "C_CONTIGUOUS"]
+    old_code = """
     int i, num_A, num_x, num_alpha, num_beta, max_num;
     int A_offset, x_offset, alpha_offset, beta_offset, y_offset, inc;
     int nrows, ncols, lda;
@@ -829,6 +884,42 @@ class dsyrk:
     """
 
 
+
+###############################################################################
+##
+## Linear Algebra
+##
+###############################################################################
+
+###############################################################################
+class dgetrf:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_la_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["A", "ipiv"]
+    code = """
+    int i, num_A
+    int A_rows, A_cols, A_offset;
+    gsl_matrix_view gsl_A;
+    gsl_permutation * p;
+    
+    
+    num_A = NA[0];
+    A_rows = NA[1]; A_cols = NA[2];
+    A_offset = num_A==1?0:A_rows*A_cols;
+    
+    p = gsl_permutation_alloc (A_rows);
+    WE ARE HERE
+    // to copy ipiv
+    for (i=0; i<num_A; i++) {
+        //int gsl_blas_dcopy (const gsl_vector * x, gsl_vector * y)
+        int gsl_blas_dcopy (nrows, &p.data, 1, const gsl_vector * x, gsl_vector * y)
+    gsl_linalg_LU_decomp (gsl_matrix * A, gsl_permutation * p, int * signum)
+    }
+    """
+
+###############################################################################
 class symmetrise:
     def __call__(self):
         return python_vars, code, support_code, libs

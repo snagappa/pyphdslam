@@ -22,7 +22,10 @@ def array(*args, **kw):
         return np.array(*args, **kw) 
 
 DEBUG = True
-
+NUM_ELEM_MISMATCH = "  *Did not recieve correct number of elements*  "
+V_V_DIM_MISMATCH = "  *Vectors have incompatible dimensions*  "
+M_V_DIM_MISMATCH = "  *Matrix and vector have incompatible dimensions*  "
+M_M_DIM_MISMATCH = "  *Matrices have incompatible dimensions*  "
 
 global_support_code = """
 #include <atlas/cblas.h>
@@ -212,8 +215,8 @@ def ddot(x, y):
     if DEBUG:
         assert_valid_vector(x, "x")
         assert_valid_vector(y, "y")
-        assert (x.shape[0] in [1, y.shape[0]]) and (y.shape[0] in [1, x.shape[0]]), "number of elements in x and y must match"
-        assert (x.shape[1] == y.shape[1]), "vectors must have equal lengths"
+        assert (x.shape[0] in [1, y.shape[0]]) and (y.shape[0] in [1, x.shape[0]]), NUM_ELEM_MISMATCH
+        assert (x.shape[1] == y.shape[1]), V_V_DIM_MISMATCH
     xt_dot_y = np.zeros(max([x.shape[0], y.shape[0]]), dtype=float)
     weave.inline(blas_tools_c_code.ddot.code,
                  blas_tools_c_code.ddot.python_vars, 
@@ -272,14 +275,13 @@ def daxpy(alpha, x, y=None):
         fn_return_val = y
     if DEBUG:
         assert_valid_vector(y, "y")
-        assert x.shape == y.shape, "x and y must have the same shape"
+        assert x.shape == y.shape, NUM_ELEM_MISMATCH+V_V_DIM_MISMATCH
     
     if np.isscalar(alpha):
         alpha = np.array([alpha])
-    alpha = alpha.astype(float)
     
     if DEBUG:
-        assert len(alpha) in [1, x.shape[0]], "alpha must be a scalar or a numpy array of same length as x"
+        assert len(alpha) in [1, x.shape[0]], V_V_DIM_MISMATCH
     
     weave.inline(blas_tools_c_code.daxpy.code,
                  blas_tools_c_code.daxpy.python_vars, 
@@ -299,7 +301,7 @@ def dscal(alpha, x):
     alpha = alpha.astype(float)
     
     if DEBUG:
-        assert len(alpha) in (1, x.shape[0]), "alpha must be a scalar or a numpy array of same length as x"
+        assert len(alpha) in (1, x.shape[0]), V_V_DIM_MISMATCH
     
     weave.inline(blas_tools_c_code.dscal.code,
                  blas_tools_c_code.dscal.python_vars, 
@@ -308,7 +310,17 @@ def dscal(alpha, x):
                  extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
     
 
-def dgemv(A, x, alpha=1.0, y=None, beta=1.0, TRANSPOSE_A=False):
+##
+## LEVEL 2 BLAS
+##
+
+#def dgemv(A, x, alpha=1.0, y=None, beta=1.0, TRANSPOSE_A=False):
+def dgemv(TRANSPOSE_A=False, alpha=1.0, A, x, beta=1.0, y=None):
+    """
+    dgemv --
+    y = alpha*A*x + beta*y OR 
+    y = alpha*A**T*x + beta*y
+    """
     if DEBUG:
         assert_valid_matrix(A, "A")
         assert_valid_vector(x, "x")
@@ -327,17 +339,19 @@ def dgemv(A, x, alpha=1.0, y=None, beta=1.0, TRANSPOSE_A=False):
     if np.isscalar(beta):
         beta = np.array([beta], dtype=float)
     if DEBUG:
-        assert len(alpha) in [1, x.shape[0], A.shape[0]], "alpha must be a scalar or a numpy array of same length as x or A"
-        assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1) or (A.shape[0]==1), "incompatible sizes for A and x specified"
-        assert A.shape[2] == x.shape[1], "x must have as many elements as columns in A"
-        assert len(beta) in [1, y.shape[0]], "beta must be a scalar or a numpy array of same length as y"
-    C_CONTIGUOUS = A.flags.c_contiguous
+        assert len(alpha) in [1, x.shape[0], A.shape[0]], NUM_ELEM_MISMATCH
+        assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1) or (A.shape[0]==1), NUM_ELEM_MISMATCH
+        if not TRANSPOSE_A:
+            assert A.shape[2] == x.shape[1], M_V_DIM_MISMATCH
+        else:
+            assert A.shape[1] == x.shape[1], M_V_DIM_MISMATCH
+        assert len(beta) in [1, y.shape[0]], NUM_ELEM_MISMATCH
+    
     weave.inline(blas_tools_c_code.dgemv.code, 
                  blas_tools_c_code.dgemv.python_vars, 
                  libraries=blas_tools_c_code.dgemv.libraries,
                  support_code=blas_tools_c_code.dgemv.support_code,
                  extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
-                 
     return fn_return_val
     
     
@@ -351,26 +365,75 @@ def dtrmv(UPLO, TRANSPOSE_A=False, A, x):
     if DEBUG:
         assert_valid_matrix(A, "A")
         assert_valid_vector(x, "x")
-        assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1) or (A.shape[0]==1), "incompatible sizes for A and x specified"
-        assert A.shape[2] == x.shape[1], "x must have as many elements as columns in A"
+        assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1) or (A.shape[0]==1), NUM_ELEM_MISMATCH
+        assert A.shape[2] == x.shape[1], M_V_DIM_MISMATCH
         
     weave.inline(blas_tools_c_code.dtrmv.code, 
                  blas_tools_c_code.dtrmv.python_vars, 
                  libraries=blas_tools_c_code.dtrmv.libraries,
                  support_code=blas_tools_c_code.dtrmv.support_code,
                  extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
-    pass
 
 
-def dtrsv():
-    pass
+def dtrsv(UPLO, TRANSPOSE_A=False, A, x):
+    """
+    dtrsv -- Solve A*x = b,   or   A**T*x = b, A is nxn triangular
+    x = A^{-1}*b or x = A^{-T}b
+    """
+    if DEBUG:
+        assert_valid_matrix(A)
+        assert_valid_vector(x)
+        assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1) or (A.shape[0]==1), NUM_ELEM_MISMATCH
+        if TRANSPOSE_A:
+            assert A.shape[1] == x.shape[1], M_V_DIM_MISMATCH
+        else:
+            assert A.shape[2] == x.shape[1], M_V_DIM_MISMATCH
+        
+    weave.inline(blas_tools_c_code.dtrsv.code, 
+                 blas_tools_c_code.dtrsv.python_vars, 
+                 libraries=blas_tools_c_code.dtrsv.libraries,
+                 support_code=blas_tools_c_code.dtrsv.support_code,
+                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
 
 
-def dsymv():
-    pass
+def dsymv(UPLO, alpha=1.0, A, x, beta=1.0, y=None):
+    """
+    dsymv -- y = alpha*A*x + beta*y, A is symmetric
+    """
+    if DEBUG:
+        assert_valid_matrix(A, "A")
+        assert_valid_vector(x, "x")
+    fn_return_val = None
+    if y==None:
+        y = np.zeros(((max([A.shape[0],x.shape[0]]),) + (x.shape[1],)))
+        fn_return_val = y
+    if DEBUG:
+        assert_valid_vector(y, "y")
+        assert y.shape[1] == x.shape[1], V_V_DIM_MISMATCH
     
-
+    if np.isscalar(alpha):
+        alpha = np.array([alpha], dtype=float)
+    if np.isscalar(beta):
+        beta = np.array([beta], dtype=float)
+    if DEBUG:
+        assert len(alpha) in [1, x.shape[0], A.shape[0]], NUM_ELEM_MISMATCH
+        assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1) or (A.shape[0]==1), NUM_ELEM_MISMATCH
+        assert A.shape[2] == x.shape[1], M_V_DIM_MISMATCH
+        assert len(beta) in [1, y.shape[0]], NUM_ELEM_MISMATCH
+    
+    weave.inline(blas_tools_c_code.dsymv.code, 
+                 blas_tools_c_code.dsymv.python_vars, 
+                 libraries=blas_tools_c_code.dsymv.libraries,
+                 support_code=blas_tools_c_code.dsymv.support_code,
+                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+                 
+    return fn_return_val
+    
+    
 def dger(x, y, alpha=1.0, A=None):
+    """
+    dger -- rank 1 operation, A = alpha*x*y**T + A
+    """
     if DEBUG:
         assert_valid_vector(x, "x")
         assert_valid_vector(y, "y")
@@ -382,14 +445,15 @@ def dger(x, y, alpha=1.0, A=None):
     
     if DEBUG:
         assert_valid_matrix(A, "A")
-        assert A.shape == (max([x.shape[0], y.shape[0]]), x.shape[1], y.shape[1]), "x,y are incompatible with A"
+        assert A.shape == (max([x.shape[0], y.shape[0]]), x.shape[1], y.shape[1]), NUM_ELEM_MISMATCH+M_V_DIM_MISMATCH
     
     if np.isscalar(alpha):
         alpha = np.array([alpha], dtype=float)
     if DEBUG:
         assert_valid_vector(alpha, "alpha")
-        assert len(alpha) in [1, x.shape[0], y.shape[0]], "alpha must be a scalar or have same length as x"
-        assert (x.shape[0]==y.shape[0]) or (x.shape[0]==1) or (y.shape[0]==1), "incompatible sizes for x and y specified"
+        assert len(alpha) in [1, x.shape[0], y.shape[0]], NUM_ELEM_MISMATCH
+        assert (x.shape[0]==y.shape[0]) or (x.shape[0]==1) or (y.shape[0]==1), NUM_ELEM_MISMATCH
+    
     weave.inline(blas_tools_c_code.dger.code, 
                  blas_tools_c_code.dger.python_vars, 
                  libraries=blas_tools_c_code.dger.libraries,
@@ -398,27 +462,66 @@ def dger(x, y, alpha=1.0, A=None):
     return fn_return_val
     
     
-def dsyr():
-    pass
+def dsyr(UPLO, alpha=1.0, x, A=None):
+    """
+    dsyr -- symmetric rank 1 operation
+    A = alpha*x*x**T + A,  A is nxn symmetric
+    """
+    if DEBUG:
+        assert_valid_vector(x, "x")
+    
+    fn_return_val = None
+    if A==None:
+        A = np.zeros(x.shape + x.shape[1], dtype=float)
+        fn_return_val = A
+    
+    if DEBUG:
+        assert_valid_matrix(A)
+        assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1), NUM_ELEM_MISMATCH
+        assert A.shape[1]==A.shape[2]==x.shape[1], M_V_DIM_MISMATCH
+    
+    weave.inline(blas_tools_c_code.dsyr.code, 
+                 blas_tools_c_code.dsyr.python_vars, 
+                 libraries=blas_tools_c_code.dsyr.libraries,
+                 support_code=blas_tools_c_code.dsyr.support_code,
+                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    return fn_return_val
 
+
+##
+## LEVEL 3 BLAS
+##
 
 #def dgemm(A, B, alpha=1.0, C=None, beta=1.0, TRANSPOSE_A=False, TRANSPOSE_B=False):
 def dgemm(TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, A, B, beta=1.0, C=None):
-    assert_valid_matrix(A, "A")
-    assert_valid_matrix(B, "B")
-    assert A.shape[0] in [1, B.shape[0]] and B.shape[0] in [1, A.shape[0]], "number of elements in A and B must be compatible"
+    """
+    dgemm -- matrix-matrix operation, 
+    C := alpha*op( A )*op( B ) + beta*C,
+    where  op( X ) is one of op( X ) = X   or   op( X ) = X**T
+    """
+    if DEBUG:
+        assert_valid_matrix(A, "A")
+        assert_valid_matrix(B, "B")
+        assert A.shape[0] in [1, B.shape[0]] and B.shape[0] in [1, A.shape[0]], NUM_ELEM_MISMATCH
     
+    A_dims = list(A.shape[1:])
+    B_dims = list(B.shape[1:])
+    if TRANSPOSE_A:
+        A_dims.reverse()
+    if TRANSPOSE_B:
+        B_dims.reverse()
+            
     fn_return_val = None
     if C==None:
-        C_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
-        C_cols = B.shape[1] if TRANSPOSE_B else B.shape[2]
-        C = np.zeros((max([A.shape[0], B.shape[0]]), C_rows, C_cols), dtype=float)
+        C = np.zeros((max([A.shape[0], B.shape[0]]), A_dims[0], B_dims[1]), dtype=float)
         fn_return_val = C
-    assert_valid_matrix(C)
     
-    test_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
-    test_cols = B.shape[1] if TRANSPOSE_B else B.shape[2]
-    assert C.shape == (max([A.shape[0], B.shape[0]]), test_rows, test_cols), "A,B are incompatible with C"
+    if DEBUG:
+        assert_valid_matrix(C)
+        test_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
+        test_cols = B.shape[1] if TRANSPOSE_B else B.shape[2]
+        assert C.shape == (max([A.shape[0], B.shape[0]]), A_dims[0], B_dims[1]), M_M_DIM_MISMATCH
+        assert A_dims[1]==B_dims[0], M_M_DIM_MISMATCH
     
     weave.inline(blas_tools_c_code.dgemm.code, 
                  blas_tools_c_code.dgemm.python_vars, 
@@ -436,24 +539,39 @@ def dsymm(SIDE='l', UPLO, alpha=1.0, A, B, beta=1.0, C=None):
     UPLO = 'l' or 'u'
     """
     if DEBUG:
-        assert_valid_matrix(A, "A")
-        assert_valid_matrix(B, "B")
-        assert A.shape[0] in [1, B.shape[0]] and B.shape[0] in [1, A.shape[0]], "number of elements in A and B must be compatible"
-    
-    fn_return_val = None
-    if C==None:
-        C_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
-        C_cols = B.shape[1] if TRANSPOSE_B else B.shape[2]
-        C = np.zeros((max([A.shape[0], B.shape[0]]), C_rows, C_cols), dtype=float)
-        fn_return_val = C
-    if DEBUG:
-        assert_valid_matrix(C)
-        
-        test_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
-        test_cols = B.shape[1] if TRANSPOSE_B else B.shape[2]
-        assert C.shape == (max([A.shape[0], B.shape[0]]), test_rows, test_cols), "A,B are incompatible with C"
         assert SIDE in ['l', 'L', 'r', 'R'], "SIDE must be one of ['l', 'L', 'r', 'R']"
         assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'L', 'u', 'U']"
+        assert_valid_matrix(A, "A")
+        assert_valid_matrix(B, "B")
+        assert A.shape[0] in [1, B.shape[0]] and B.shape[0] in [1, A.shape[0]], NUM_ELEM_MISMATCH
+    
+    if np.isscalar(alpha):
+        alpha = np.array([alpha], dtype=float)
+    if DEBUG:
+        assert_valid_vector(alpha, "alpha")
+        assert len(alpha) in [1, A.shape[0], B.shape[0]], NUM_ELEM_MISMATCH
+            
+    A_dims = list(A.shape[1:])
+    B_dims = list(B.shape[1:])
+    
+    if np.isscalar(beta):
+        alpha = np.array([beta], dtype=float)
+    fn_return_val = None
+    if C==None:
+        if SIDE=='l':
+            C = np.zeros((max([A.shape[0], B.shape[0]]), A_dims[0], B_dims[1]), dtype=float)
+        else:
+            C = np.zeros((max([A.shape[0], B.shape[0]]), B_dims[0], A_dims[1]), dtype=float)
+        fn_return_val = C
+        
+    if DEBUG:
+        assert_valid_matrix(C)
+        if SIDE=='l':
+            assert C.shape == (max([A.shape[0], B.shape[0]]), A_dims[0], B_dims[1]), NUM_ELEM_MISMATCH+M_M_DIM_MISMATCH
+        else:
+            assert C.shape == (max([A.shape[0], B.shape[0]]), B_dims[0], A_dims[1]), NUM_ELEM_MISMATCH+M_M_DIM_MISMATCH
+        assert_valid_vector(beta, "beta")
+        assert len(beta) in [1, C.shape[0]], NUM_ELEM_MISMATCH
     
     weave.inline(blas_tools_c_code.dsymm.code, 
                  blas_tools_c_code.dsymm.python_vars, 
@@ -470,18 +588,21 @@ def dsyrk(UPLO, TRANSPOSE_A, alpha=1.0, A, beta=1.0, C=None):
     C := alpha*A**T*A + beta*C  if TRANSPOSE_A=True
     """
     if DEBUG:
+        assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'L', 'u', 'U']"
         assert_valid_matrix(A, "A")
+    
+    A_dims = list(A.shape[1:])
+    if TRANSPOSE_A:
+        A_dims.reverse()
         
     fn_return_val = None
     if C==None:
-        C_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
-        C = np.zeros((max([A.shape[0], B.shape[0]]), C_rows, C_rows), dtype=float)
+        C = np.zeros((max([A.shape[0], B.shape[0]]), A_dims[0], A_dims[1]), dtype=float)
         fn_return_val = C
+    
     if DEBUG:
         assert_valid_matrix(C)
-        test_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
-        assert C.shape == (A.shape[0], test_rows, test_rows), "A is incompatible with C"
-        assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'L', 'u', 'U']"
+        assert C.shape == (A.shape[0], A_dims[0], A_dims[0]), M_M_DIM_MISMATCH
     
     weave.inline(blas_tools_c_code.dsyrk.code, 
                  blas_tools_c_code.dsyrk.python_vars, 
@@ -490,6 +611,10 @@ def dsyrk(UPLO, TRANSPOSE_A, alpha=1.0, A, beta=1.0, C=None):
                  extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
     return fn_return_val
 
+
+##
+## LINEAR ALGEBRA
+##
 
 # Solve Ax = B
 def dgesv():
