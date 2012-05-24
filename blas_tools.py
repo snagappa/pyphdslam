@@ -21,7 +21,7 @@ def array(*args, **kw):
     else:
         return np.array(*args, **kw) 
 
-DEBUG = False
+DEBUG = True
 
 
 global_support_code = """
@@ -341,6 +341,35 @@ def dgemv(A, x, alpha=1.0, y=None, beta=1.0, TRANSPOSE_A=False):
     return fn_return_val
     
     
+def dtrmv(UPLO, TRANSPOSE_A=False, A, x):
+    """
+    dtrmv -- 
+    x := A*x  if TRANSPOSE_A=False or   
+    x := A**T*x  if TRANSPOSE_A=True
+    A is nxn triangular
+    """
+    if DEBUG:
+        assert_valid_matrix(A, "A")
+        assert_valid_vector(x, "x")
+        assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1) or (A.shape[0]==1), "incompatible sizes for A and x specified"
+        assert A.shape[2] == x.shape[1], "x must have as many elements as columns in A"
+        
+    weave.inline(blas_tools_c_code.dtrmv.code, 
+                 blas_tools_c_code.dtrmv.python_vars, 
+                 libraries=blas_tools_c_code.dtrmv.libraries,
+                 support_code=blas_tools_c_code.dtrmv.support_code,
+                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    pass
+
+
+def dtrsv():
+    pass
+
+
+def dsymv():
+    pass
+    
+
 def dger(x, y, alpha=1.0, A=None):
     if DEBUG:
         assert_valid_vector(x, "x")
@@ -369,10 +398,15 @@ def dger(x, y, alpha=1.0, A=None):
     return fn_return_val
     
     
-    
-def dgemm(A, B, alpha=1.0, C=None, beta=1.0, TRANSPOSE_A=False, TRANSPOSE_B=False):
+def dsyr():
+    pass
+
+
+#def dgemm(A, B, alpha=1.0, C=None, beta=1.0, TRANSPOSE_A=False, TRANSPOSE_B=False):
+def dgemm(TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, A, B, beta=1.0, C=None):
     assert_valid_matrix(A, "A")
     assert_valid_matrix(B, "B")
+    assert A.shape[0] in [1, B.shape[0]] and B.shape[0] in [1, A.shape[0]], "number of elements in A and B must be compatible"
     
     fn_return_val = None
     if C==None:
@@ -380,17 +414,129 @@ def dgemm(A, B, alpha=1.0, C=None, beta=1.0, TRANSPOSE_A=False, TRANSPOSE_B=Fals
         C_cols = B.shape[1] if TRANSPOSE_B else B.shape[2]
         C = np.zeros((max([A.shape[0], B.shape[0]]), C_rows, C_cols), dtype=float)
         fn_return_val = C
-    C_is = whatisit(C)
-    assert C_is.consistent_type()==np.ndarray, "C must by of type ndarray"
-    assert C.flags.c_contiguous, "blas_tools.dgemm may only be used with C-order contiguous data"
+    assert_valid_matrix(C)
     
     test_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
     test_cols = B.shape[1] if TRANSPOSE_B else B.shape[2]
-    assert C_is.shape == (max([A.shape[0], B.shape[0]]), test_rows, test_cols), "A,B are incompatible with C"
+    assert C.shape == (max([A.shape[0], B.shape[0]]), test_rows, test_cols), "A,B are incompatible with C"
     
+    weave.inline(blas_tools_c_code.dgemm.code, 
+                 blas_tools_c_code.dgemm.python_vars, 
+                 libraries=blas_tools_c_code.dgemm.libraries,
+                 support_code=blas_tools_c_code.dgemm.support_code,
+                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
     return fn_return_val
 
 
+def dsymm(SIDE='l', UPLO, alpha=1.0, A, B, beta=1.0, C=None):
+    """
+    dsymm -- matrix-matrix operation, A is symmetric, B and C are mxn
+    C := alpha*A*B + beta*C, if SIDE='l' or
+    C := alpha*B*A + beta*C, if SIDE='r'
+    UPLO = 'l' or 'u'
+    """
+    if DEBUG:
+        assert_valid_matrix(A, "A")
+        assert_valid_matrix(B, "B")
+        assert A.shape[0] in [1, B.shape[0]] and B.shape[0] in [1, A.shape[0]], "number of elements in A and B must be compatible"
+    
+    fn_return_val = None
+    if C==None:
+        C_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
+        C_cols = B.shape[1] if TRANSPOSE_B else B.shape[2]
+        C = np.zeros((max([A.shape[0], B.shape[0]]), C_rows, C_cols), dtype=float)
+        fn_return_val = C
+    if DEBUG:
+        assert_valid_matrix(C)
+        
+        test_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
+        test_cols = B.shape[1] if TRANSPOSE_B else B.shape[2]
+        assert C.shape == (max([A.shape[0], B.shape[0]]), test_rows, test_cols), "A,B are incompatible with C"
+        assert SIDE in ['l', 'L', 'r', 'R'], "SIDE must be one of ['l', 'L', 'r', 'R']"
+        assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'L', 'u', 'U']"
+    
+    weave.inline(blas_tools_c_code.dsymm.code, 
+                 blas_tools_c_code.dsymm.python_vars, 
+                 libraries=blas_tools_c_code.dsymm.libraries,
+                 support_code=blas_tools_c_code.dsymm.support_code,
+                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    return fn_return_val
+
+
+def dsyrk(UPLO, TRANSPOSE_A, alpha=1.0, A, beta=1.0, C=None):
+    """
+    dsyrk -- symmetric rank k operation, C is symmetric
+    C := alpha*A*A**T + beta*C  if TRANSPOSE_A=False or
+    C := alpha*A**T*A + beta*C  if TRANSPOSE_A=True
+    """
+    if DEBUG:
+        assert_valid_matrix(A, "A")
+        
+    fn_return_val = None
+    if C==None:
+        C_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
+        C = np.zeros((max([A.shape[0], B.shape[0]]), C_rows, C_rows), dtype=float)
+        fn_return_val = C
+    if DEBUG:
+        assert_valid_matrix(C)
+        test_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
+        assert C.shape == (A.shape[0], test_rows, test_rows), "A is incompatible with C"
+        assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'L', 'u', 'U']"
+    
+    weave.inline(blas_tools_c_code.dsyrk.code, 
+                 blas_tools_c_code.dsyrk.python_vars, 
+                 libraries=blas_tools_c_code.dsyrk.libraries,
+                 support_code=blas_tools_c_code.dsyrk.support_code,
+                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    return fn_return_val
+
+
+# Solve Ax = B
+def dgesv():
+    pass
+
+# LU decomposition
+def dgetrf():
+    pass
+
+# Solve Ax=B using LU decomposition
+def dgetrs():
+    pass
+
+# Compute inverse using LU decomposition from dgetrf
+def dgetri():
+    pass
+
+
+# Solve for positive definite matrix
+def dposv():
+    pass
+
+# Cholesky decomposition
+def dpotrf():
+    pass
+
+# Solve using Cholesky decomposition
+def dpotrs():
+    pass
+
+# Compute inverse using Cholesky factorisation from dpotrf
+def dpotri():
+    pass
+
+
+def symmetrise(A, UPLO):
+    if DEBUG:
+        assert_valid_matrix(A, "A")
+        assert A.shape[1]==A.shape[2], "A must be symmetric"
+        assert type(UPLO)
+        assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'u', 'L', 'U']
+    weave.inline(blas_tools_c_code.symmetrise.code, 
+                 blas_tools_c_code.symmetrise.python_vars, 
+                 libraries=blas_tools_c_code.symmetrise.libraries,
+                 support_code=blas_tools_c_code.symmetrise.support_code,
+                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    
 
 def dgemv_old(A, x, alpha=1.0, beta=0.0, y=None, TRANSPOSE_A=False):
     A_is = whatisit(A)
@@ -568,4 +714,25 @@ def test_dgemv(num_elements=1000, num_dims=4, num_rows=4):
     max_err1 = np.max(np.abs(np_result - np_dgemv_result))
     print "Maximum error = ", max_err1, " for np_arrays"
     
+def test_dger(num_elements=1000, dims_x=4, dims_y=2):
+    x = np.random.rand(num_elements, dims_x)
+    y = np.random.rand(num_elements, dims_y)
+    A = np.random.rand(num_elements, dims_x, dims_y)
+    alpha = np.random.rand(num_elements)
+    np_dger = np.array([np.array(alpha[i]*np.dot(np.matrix(x[i]).T, np.matrix(y[i]))) + A[i] for i in range(num_elements)])
+    dger(x, y, alpha, A)
+    max_err = np.max(np.abs(np_dger.squeeze()-A.squeeze()))
+    print "Maximum error = ", max_err
     
+def test_dgemm(num_elements=1000, rows_A=4, cols_A=2, cols_B=6):
+    alpha = np.random.rand(num_elements)
+    A = np.random.rand(num_elements, rows_A, cols_A)
+    B = np.random.rand(num_elements, cols_A, cols_B)
+    beta = np.random.rand(num_elements)
+    C = np.random.rand(num_elements, rows_A, cols_B)
+    
+    
+    np_dgemm = np.array([np.array(alpha[i]*np.dot(A[i], B[i])) + beta[i]*C[i] for i in range(num_elements)])
+    dgemm(A, B, alpha, C, beta)
+    max_err = np.max(np.abs(np_dgemm.squeeze()-C.squeeze()))
+    print "Maximum error = ", max_err

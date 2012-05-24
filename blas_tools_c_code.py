@@ -5,7 +5,7 @@ Created on Sun May 20 19:05:54 2012
 @author: snagappa
 """
 
-EXTRA_COMPILE_ARGS = ["-g -fopenmp"]
+EXTRA_COMPILE_ARGS = ["-O3 -g -fopenmp"]
 lopenblas = ["openblas"]
 lblas = ["blas"]
 lgsl = ["gsl"]
@@ -80,6 +80,7 @@ inline void copylist2d(double *A, int nrows, int ncols, py::indexed_ref A_copy) 
 }
 
 """
+
 
 class lcopy:
     def __call__(self):
@@ -409,8 +410,152 @@ class dgemv:
 
 
 ###############################################################################
-# dsymv -- y = alpha*A*x + beta*y, A is symmetric
+# dtrmv -- x := A*x,   or   x := A**T*x, A is nxn triangular
+class dtrmv:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["A", "x", "UPLO", "TRANSPOSE_A"]
+    code = """
+    int i, num_A, num_x;
+    int nrows, vec_len, x_offset, A_offset;
+    CBLAS_UPLO_t Uplo;
+    CBLAS_TRANSPOSE_t TransA;
+    gsl_matrix_view gsl_A;
+    gsl_vector_view gsl_x;
+    int nthreads, tid;
+    
+    num_x = Nx[0];
+    num_A = NA[0];
+    nrows = NA[1];
+    
+    vec_len = Nx[1];
+    x_offset = num_x==1?0:vec_len;
+    A_offset = num_A==1?0:nrows*nrows;
+    
+    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    TransA = (int)TRANSPOSE_A?CblasTrans:CblasNoTrans;
+    
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_x, A, A_offset, nrows, x, x_offset, vec_len, Uplo, TransA) private(i, gsl_A, gsl_x)
+    for (i=0; i<num_x; i++) {
+        gsl_A = gsl_matrix_view_array(A+(i*A_offset), nrows, nrows);
+        gsl_x = gsl_vector_view_array(x+(i*x_offset), vec_len);
+        gsl_blas_dtrmv (Uplo, Trans_A, CblasNonUnit, &gsl_A.matrix, &gsl_x.vector);
+    }
+    """
+    
+    
+###############################################################################
+# dtrsv -- Solve A*x = b,   or   A**T*x = b, A is nxn triangular
+class dtrsv:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["A", "x", "UPLO", "TRANSPOSE_A"]
+    code = """
+    int i, num_A, num_x;
+    int nrows, vec_len, x_offset, A_offset;
+    CBLAS_UPLO_t Uplo;
+    CBLAS_TRANSPOSE_t TransA;
+    gsl_matrix_view gsl_A;
+    gsl_vector_view gsl_x;
+    int nthreads, tid;
+    
+    num_x = Nx[0];
+    num_A = NA[0];
+    nrows = NA[1];
+    
+    vec_len = Nx[1];
+    x_offset = num_x==1?0:vec_len;
+    A_offset = num_A==1?0:nrows*nrows;
+    
+    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    TransA = (int)TRANSPOSE_A?CblasTrans:CblasNoTrans;
+    
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_x, A, A_offset, nrows, x, x_offset, vec_len, Uplo, TransA) private(i, gsl_A, gsl_x)
+    for (i=0; i<num_x; i++) {
+        gsl_A = gsl_matrix_view_array(A+(i*A_offset), nrows, nrows);
+        gsl_x = gsl_vector_view_array(x+(i*x_offset), vec_len);
+        gsl_blas_dtrsv (Uplo, Trans_A, CblasNonUnit, &gsl_A.matrix, &gsl_x.vector);
+    }
+    """
+    
 
+###############################################################################
+# dsymv -- y = alpha*A*x + beta*y, A is symmetric
+class dsymv:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["alpha", "A", "x", "beta", "y", "UPLO"]
+    code = """
+    int i, num_alpha, num_A, num_x, num_beta, num_y;
+    int nrows, vec_len, x_offset, A_offset, alpha_offset, beta_offset, y_offset;
+    CBLAS_UPLO_t Uplo;
+    gsl_matrix_view gsl_A;
+    gsl_vector_view gsl_x;
+    gsl_vector_view gsl_y;
+    int nthreads, tid;
+    
+    num_x = Nx[0];
+    num_A = NA[0];
+    nrows = NA[1];
+    num_alpha = Nalpha[0];
+    num_beta = Nbeta[0];
+    num_y = Ny[0];
+    
+    vec_len = Nx[1];
+    x_offset = num_x==1?0:vec_len;
+    A_offset = num_A==1?0:nrows*nrows;
+    alpha_offset = !(num_alpha==1);
+    beta_offset = !(num_beta==1);
+    y_offset = vec_len;
+    
+    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_y, A, A_offset, nrows, x, x_offset, vec_len, Uplo, alpha, beta) private(i, gsl_A, gsl_x, gsl_y)
+    for (i=0; i<num_y; i++) {
+        gsl_A = gsl_matrix_view_array(A+(i*A_offset), nrows, nrows);
+        gsl_x = gsl_vector_view_array(x+(i*x_offset), vec_len);
+        gsl_y = gsl_vector_view_array(y+(i*y_offset), vec_len);
+        gsl_blas_dsymv (Uplo, alpha[i*alpha_offset], &gsl_A.matrix, 
+                        &gsl_x.vector, beta[i*beta_offset], &gsl_y.vector);
+    }
+    """
+    
 
 ###############################################################################
 # dger -- rank 1 operation, A = alpha*x*y**T + A
@@ -427,14 +572,14 @@ class dger:
     int i, num_x, num_y, num_alpha, num_A;
     int nrows, ncols, x_vec_len, x_offset, y_vec_len, y_offset, alpha_offset, A_offset, inc;
     gsl_matrix_view gsl_A;
-    gsl_vector_view gsl_x;
-    gsl_vector_view gsl_y;
+    gsl_vector_view gsl_x, gsl_y;
     int nthreads, tid;
     
     inc = 1;
     num_x = Nx[0];
     num_y = Ny[0];
     num_alpha = Nalpha[0];
+    num_A = NA[0];
     
     x_vec_len = Nx[1];
     y_vec_len = Ny[1];
@@ -458,19 +603,61 @@ class dger:
     
     #pragma omp parallel for \
         shared(num_A, A, A_offset, nrows, ncols, x, x_offset, x_vec_len, y, y_offset, y_vec_len, alpha, alpha_offset) private(i, gsl_A, gsl_x, gsl_y)
-    for (i=1; i<num_A; i++) {
+    for (i=0; i<num_A; i++) {
         gsl_A = gsl_matrix_view_array(A+(i*A_offset), nrows, ncols);
         gsl_x = gsl_vector_view_array(x+(i*x_offset), x_vec_len);
         gsl_y = gsl_vector_view_array(y+(i*y_offset), y_vec_len);
-        gsl_blas_dger (alpha[i*alpha_offset], x, y, A.matrix);
+        gsl_blas_dger (alpha[i*alpha_offset], &gsl_x.vector, &gsl_y.vector, &gsl_A.matrix);
     }
         //dger(&nrows, &ncols, alpha+(i*alpha_offset), x+(i*x_offset), &inc, 
         //     y+(i*y_offset), &inc, A+(i*A_offset), &nrows);
     """
 
 ###############################################################################
-# dsyr -- symmetric rank 1 operation, A = alpha*x*x**T + A
-
+# dsyr -- symmetric rank 1 operation, A = alpha*x*x**T + A, A is nxn symmetric
+class dsyr:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["A", "x", "alpha", "UPLO"]
+    code = """
+    int i, num_x, num_A, num_alpha;
+    int nrows, x_vec_len, x_offset, A_offset, alpha_offset;
+    CBLAS_UPLO_t Uplo;
+    gsl_matrix_view gsl_A;
+    gsl_vector_view gsl_x;
+    int nthreads, tid;
+    
+    num_x = Nx[0];
+    num_A = NA[0];
+    x_vec_len = Nx[1];
+    nrows = NA[1];
+    num_alpa = Nalpha[0];
+    
+    x_offset = num_x==1?0:x_vec_len;
+    A_offset = nrows*nrows;
+    alpha_offset = !(num_alpha==1);
+    
+    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_A, A, A_offset, nrows, x, x_offset, x_vec_len, alpha, alpha_offset) private(i, gsl_A, gsl_x)
+    for (i=0; i<num_A; i++) {
+        gsl_A = gsl_matrix_view_array(A+(i*A_offset), nrows, nrows);
+        gsl_x = gsl_vector_view_array(x+(i*x_offset), x_vec_len);
+        gsl_blas_dsyr (Uplo, alpha[i*alpha_offset], &gsl_x.vector, &gsl_A.matrix);
+    }
+    """
 
 ###############################################################################
 # dsyr2 -- symmetric rank 2 operation, A = alpha*x*y**T + alpha*y*x**T + A
@@ -489,13 +676,15 @@ class dger:
 class dgemm:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = f77_blas_headers+omp_headers
+    support_code = gsl_blas_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
-    python_vars = ["A", "B", "C", "alpha", "beta"]
+    python_vars = ["A", "B", "C", "alpha", "beta", "TRANSPOSE_A", "TRANSPOSE_B"]
     code = """
     int i, num_A, num_B, num_C, num_alpha, num_beta;
     int A_rows, A_cols, B_rows, B_cols, C_rows, C_cols;
     int A_offset, B_offset, C_offset, alpha_offset, beta_offset;
+    CBLAS_TRANSPOSE_t TransA, TransB;
+    gsl_matrix_view gsl_A, gsl_B, gsl_C;
     int nthreads, tid;
     
     num_A = NA[0]; A_rows = NA[1]; A_cols = NA[2];
@@ -509,6 +698,9 @@ class dgemm:
     C_offset = num_C==1?0:C_rows*C_cols;
     alpha_offset = !(num_alpha==1);
     beta_offset = !(num_beta==1);
+    
+    TransA = (int)TRANSPOSE_A?CblasTrans:CblasNoTrans;
+    TransB = (int)TRANSPOSE_B?CblasTrans:CblasNoTrans;
     
     #pragma omp parallel private(i, tid)
     {
@@ -525,22 +717,169 @@ class dgemm:
         gsl_A = gsl_matrix_view_array(A+(i*A_offset), A_rows, A_cols);
         gsl_B = gsl_matrix_view_array(B+(i*B_offset), B_rows, B_cols);
         gsl_C = gsl_matrix_view_array(C+(i*C_offset), C_rows, C_cols);
-        gsl_blas_dgemm (TransA, TransB, alpha[i*alpha_offset], &A.matrix, 
-                        &B.matrix, beta[i*beta_offset], &C.matrix);
+        gsl_blas_dgemm (TransA, TransB, alpha[i*alpha_offset], &gsl_A.matrix, 
+                        &gsl_B.matrix, beta[i*beta_offset], &gsl_C.matrix);
     }
     """
 
 ###############################################################################
-# dsymm -- matrix-matrix operation, A is symmetric
+# dsymm -- matrix-matrix operation, A is symmetric, B and C are mxn
 #           C := alpha*A*B + beta*C, or
 #           C := alpha*B*A + beta*C
+class dsymm:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["A", "B", "C", "alpha", "beta", "SIDE", "UPLO"]
+    code = """
+    int i, num_A, num_B, num_C, num_alpha, num_beta;
+    int A_rows, B_rows, B_cols, C_rows, C_cols;
+    int A_offset, B_offset, C_offset, alpha_offset, beta_offset;
+    CBLAS_SIDE_t Side;
+    CBLAS_UPLO_t Uplo;
+    gsl_matrix_view gsl_A, gsl_B, gsl_C;
+    int nthreads, tid;
+    
+    num_A = NA[0]; A_rows = NA[1];
+    num_B = NB[0]; B_rows = NB[1]; B_cols = NB[2];
+    num_C = NC[0]; C_rows = NC[1]; C_cols = NC[2];
+    num_alpha = Nalpha[0];
+    num_beta = Nbeta[0];
+    
+    A_offset = num_A==1?0:A_rows*A_rows;
+    B_offset = num_B==1?0:B_rows*B_cols;
+    C_offset = num_C==1?0:C_rows*C_cols;
+    alpha_offset = !(num_alpha==1);
+    beta_offset = !(num_beta==1);
+    
+    Side = std::tolower(SIDE)=='l'?CblasLeft:CblasRight;
+    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    
+    #pragma omp parallel private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_C, A, A_offset, A_rows, B, B_offset, B_rows, B_cols, C, C_offset, C_rows, C_cols, alpha, alpha_offset, beta, beta_offset) private(i, gsl_A, gsl_B, gsl_C)
+    for (i=0; i<num_C; i++) {
+        gsl_A = gsl_matrix_view_array(A+(i*A_offset), A_rows, A_rows);
+        gsl_B = gsl_matrix_view_array(B+(i*B_offset), B_rows, B_cols);
+        gsl_C = gsl_matrix_view_array(C+(i*C_offset), C_rows, C_cols);
+        gsl_blas_dsymm (Side, Uplo, alpha[i*alpha_offset], &gsl_A.matrix, 
+                        &gsl_B.matrix, beta[i*beta_offset], &gsl_C.matrix);
+    }
+    """
 
 
 ###############################################################################
 # dsyrk -- symmetric rank k operation, C is symmetric
 #           C := alpha*A*A**T + beta*C, or
 #           C := alpha*A**T*A + beta*C
+class dsyrk:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["A", "alpha", "C", "beta", "TRANSPOSE_A", "UPLO"]
+    code = """
+    int i, num_A, num_C, num_alpha, num_beta;
+    int A_rows, A_cols, C_rows;
+    int A_offset, C_offset, alpha_offset, beta_offset;
+    CBLAS_TRANSPOSE_t TransA;
+    CBLAS_UPLO_t Uplo;
+    gsl_matrix_view gsl_A, gsl_C;
+    int nthreads, tid;
+    
+    num_A = NA[0]; A_rows = NA[1]; A_cols = NA[2];
+    num_C = NC[0]; C_rows = NC[1];
+    num_alpha = Nalpha[0];
+    num_beta = Nbeta[0];
+    
+    A_offset = num_A==1?0:A_rows*A_cols;
+    C_offset = num_C==1?0:C_rows*C_rows;
+    alpha_offset = !(num_alpha==1);
+    beta_offset = !(num_beta==1);
+    
+    TransA = (int)TRANSPOSE_A?CblasTrans:CblasNoTrans;
+    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    
+    #pragma omp parallel private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_C, A, A_offset, A_rows, C, C_offset, C_rows, alpha, alpha_offset, beta, beta_offset) private(i, gsl_A, gsl_C)
+    for (i=0; i<num_C; i++) {
+        gsl_A = gsl_matrix_view_array(A+(i*A_offset), A_rows, A_cols);
+        gsl_C = gsl_matrix_view_array(C+(i*C_offset), C_rows, C_rows);
+        gsl_blas_dsyrk (Uplo, TransA, alpha[i*alpha_offset], &gsl_A.matrix, 
+                        beta[i*beta_offset], &gsl_C.matrix);
+    }
+    """
 
+
+class symmetrise:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    helper_code = """
+    inline void symmetrise_upper(int *M, int *N, double *A) {
+        int i, j;
+        for (i=1; i<M; i++)
+            for (j=0; j<i; j++)
+                A[i*N+j] = A[j*N+i];
+    }
+    
+    inline void symmetrise_lower(int *M, int *N, double *A) {
+        int i, j;
+        for (i=0; i<M-1; i++)
+            for (j=i+1; j<N; j++)
+                A[i*N+j] = A[j*N+i];
+    }
+    """
+    support_code = omp_headers+helper_code+gsl_blas_headers
+    libraries = lgomp+lgsl
+    python_vars = ["A", "UPLO"]
+    code = """
+    int i, num_A, tid, nthreads;
+    int nrows, ncols, A_offset;
+    CBLAS_UPLO_t Uplo;
+    
+    num_A = NA[0];
+    nrows = NA[1];
+    ncols = NA[2];
+    A_offset = nrows*ncols;
+    
+    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    
+    #pragma omp parallel private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(A, Uplo, A_offset, A_rows, C, C_offset, C_rows, alpha, alpha_offset, beta, beta_offset) private(i, gsl_A, gsl_C)
+    for (i=0; i<num_A; i++) {
+        if (Uplo==CblasLower)
+            symmetrise_lower(&nrows, &ncols, A+(i*A_offset))
+        else //if (Uplo==CblasUpper)
+            symmetrise_upper(&nrows, &ncols, A+(i*A_offset))
+    }
+    """
 
 
 ###############################################################################
