@@ -489,7 +489,7 @@ class dtrmv:
     x_offset = num_x==1?0:vec_len;
     A_offset = num_A==1?0:nrows*nrows;
     
-    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    Uplo = std::tolower(UPLO[0])=='l'?CblasLower:CblasUpper;
     TransA = (int)TRANSPOSE_A?CblasTrans:CblasNoTrans;
     
     #pragma omp parallel shared(nthreads) private(i, tid)
@@ -536,7 +536,7 @@ class dtrsv:
     x_offset = num_x==1?0:vec_len;
     A_offset = num_A==1?0:nrows*nrows;
     
-    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    Uplo = std::tolower(UPLO[0])=='l'?CblasLower:CblasUpper;
     TransA = (int)TRANSPOSE_A?CblasTrans:CblasNoTrans;
     
     #pragma omp parallel shared(nthreads) private(i, tid)
@@ -589,7 +589,7 @@ class dsymv:
     beta_offset = !(num_beta==1);
     y_offset = vec_len;
     
-    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    Uplo = std::tolower(UPLO[0])=='l'?CblasLower:CblasUpper;
     
     #pragma omp parallel shared(nthreads) private(i, tid)
     {
@@ -688,13 +688,13 @@ class dsyr:
     num_A = NA[0];
     x_vec_len = Nx[1];
     nrows = NA[1];
-    num_alpa = Nalpha[0];
+    num_alpha = Nalpha[0];
     
     x_offset = num_x==1?0:x_vec_len;
     A_offset = nrows*nrows;
     alpha_offset = !(num_alpha==1);
     
-    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    Uplo = std::tolower(UPLO[0])=='l'?CblasLower:CblasUpper;
     
     #pragma omp parallel shared(nthreads) private(i, tid)
     {
@@ -809,7 +809,7 @@ class dsymm:
     beta_offset = !(num_beta==1);
     
     Side = std::tolower(SIDE)=='l'?CblasLeft:CblasRight;
-    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    Uplo = std::tolower(UPLO[0])=='l'?CblasLower:CblasUpper;
     
     #pragma omp parallel private(i, tid)
     {
@@ -862,7 +862,7 @@ class dsyrk:
     beta_offset = !(num_beta==1);
     
     TransA = (int)TRANSPOSE_A?CblasTrans:CblasNoTrans;
-    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    Uplo = std::tolower(UPLO[0])=='l'?CblasLower:CblasUpper;
     
     #pragma omp parallel private(i, tid)
     {
@@ -897,41 +897,342 @@ class dgetrf:
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
-    python_vars = ["A", "ipiv"]
+    python_vars = ["A", "ipiv", "signum"]
     code = """
-    int i, num_A
+    int i, j, num_A;
     int A_rows, A_cols, A_offset;
     gsl_matrix_view gsl_A;
     gsl_permutation * p;
-    
+    int s, COPY_IPIV;
+    size_t *p_data;
+    if (sizeof(size_t) == sizeof(int))
+        COPY_IPIV = 0;
     
     num_A = NA[0];
     A_rows = NA[1]; A_cols = NA[2];
     A_offset = num_A==1?0:A_rows*A_cols;
     
+    #pragma omp parallel shared(A_rows, num_A, A, A_offset, COPY_IPIV, ipiv, signum) private(p, p_data, i, gsl_A, s, j)
+    {
     p = gsl_permutation_alloc (A_rows);
-    WE ARE HERE
-    // to copy ipiv
+    p_data = p->data;
+    
+    #pragma omp for
     for (i=0; i<num_A; i++) {
-        //int gsl_blas_dcopy (const gsl_vector * x, gsl_vector * y)
-        int gsl_blas_dcopy (nrows, &p.data, 1, const gsl_vector * x, gsl_vector * y)
-    gsl_linalg_LU_decomp (gsl_matrix * A, gsl_permutation * p, int * signum)
+        gsl_A = gsl_matrix_view_array(A+(i*A_offset), A_rows, A_rows);
+        if (!COPY_IPIV)
+            p->data = (size_t*)ipiv+(i*A_rows);
+        gsl_linalg_LU_decomp (&gsl_A.matrix, p, &s);
+        signum[i] = s;
+        // memcpy p to ipiv
+        if (COPY_IPIV)
+            //memcpy(ipiv+(i*A_rows), p->data, A_rows*sizeof(size_t));
+            for (j=0; j<A_rows; j++)
+                ipiv[i*A_rows+j] = p->data[j];
+    }
+    p->data = p_data;
+    gsl_permutation_free(p);
     }
     """
 
+
+###############################################################################
+class dgetrsv:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_la_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["LU", "ipiv", "b", "x"]
+    code = """
+    int i, j, num_LU, num_b, num_x;
+    int LU_rows, LU_cols, LU_offset, b_offset, x_offset, ipiv_offset;
+    gsl_matrix_view gsl_LU;
+    gsl_vector_view gsl_x, gsl_b;
+    gsl_permutation * p;
+    int COPY_IPIV;
+    size_t *p_data;
+    if (sizeof(size_t) == sizeof(int))
+        COPY_IPIV = 0;
+    
+    num_LU = NLU[0];
+    LU_rows = NLU[1];
+    LU_offset = num_LU==1?0:LU_rows*LU_rows;
+    ipiv_offset = num_LU==1?0:LU_rows;
+    
+    num_b = Nb[0];
+    b_offset = num_b==1?0:LU_rows;
+    num_x = Nx[0];
+    x_offset = LU_rows;
+    
+    #pragma omp parallel shared(LU_rows, num_x, LU, LU_offset, b, b_offset, x, x_offset, COPY_IPIV, ipiv, ipiv_offset) private(p, p_data, i, gsl_LU, gsl_b, gsl_x, j)
+    {
+    p = gsl_permutation_alloc (LU_rows);
+    p_data = p->data;
+    
+    #pragma omp for
+    for (i=0; i<num_x; i++) {
+        gsl_LU = gsl_matrix_view_array(LU+(i*LU_offset), LU_rows, LU_rows);
+        gsl_b = gsl_vector_view_array(b+(i*b_offset), LU_rows);
+        gsl_x = gsl_vector_view_array(x+(i*x_offset), LU_rows);
+        if (!COPY_IPIV)
+            p->data = ipiv+(i*ipiv_offset);
+        else
+            for (j=0; j<A_rows; j++)
+                p->data[j] = ipiv[i*A_rows+j];
+        gsl_linalg_LU_solve (&gsl_LU.matrix, p, &gsl_b.vector, &gsl_x.vector);
+        //for (int j=0; j<LU_rows; j++)
+        //    std::cout << "p["<<j<<"]=" << p->data[j] << "  ipiv["<<j<<"]="<<ipiv[i*ipiv_offset+j] << std::endl;
+    }
+    p->data = p_data;
+    gsl_permutation_free(p);
+    }
+    """
+    
+    
+###############################################################################
+class dgetrsvx:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_la_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["LU", "ipiv", "x"]
+    code = """
+    int i, j, num_LU, num_x;
+    int LU_rows, LU_cols, LU_offset, x_offset, ipiv_offset;
+    gsl_matrix_view gsl_LU;
+    gsl_vector_view gsl_x;
+    gsl_permutation * p;
+    int COPY_IPIV;
+    size_t *p_data;
+    if (sizeof(size_t) == sizeof(int))
+        COPY_IPIV = 0;
+    
+    num_LU = NLU[0];
+    LU_rows = NLU[1];
+    LU_offset = num_LU==1?0:LU_rows*LU_rows;
+    ipiv_offset = num_LU==1?0:LU_rows;
+    num_x = Nx[0];
+    x_offset = LU_rows;
+    
+    #pragma omp parallel shared(LU_rows, num_x, LU, LU_offset, x, x_offset, COPY_IPIV, ipiv, ipiv_offset) private(p, p_data, i, gsl_LU, gsl_x, j)
+    {
+    p = gsl_permutation_alloc (LU_rows);
+    p_data = p->data;
+    
+    #pragma omp for
+    for (i=0; i<num_x; i++) {
+        gsl_LU = gsl_matrix_view_array(LU+(i*LU_offset), LU_rows, LU_rows);
+        gsl_x = gsl_vector_view_array(x+(i*x_offset), LU_rows);
+        if (!COPY_IPIV)
+            p->data = ipiv+(i*ipiv_offset);
+        else
+            for (j=0; j<LU_rows; j++)
+                p->data[j] = ipiv[i*LU_rows+j];
+        gsl_linalg_LU_svx (&gsl_LU.matrix, p, &gsl_x.vector);
+        //for (int j=0; j<LU_rows; j++)
+        //    std::cout << "p["<<j<<"]=" << p->data[j] << "  ipiv["<<j<<"]="<<ipiv[i*LU_offset+j] << std::endl;
+    }
+    p->data = p_data;
+    gsl_permutation_free(p);
+    }
+    """
+    
+    
+###############################################################################
+class dgetri:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_la_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["LU", "ipiv", "invA"]
+    code = """
+    int i, j, num_LU;
+    int LU_rows, LU_cols, LU_offset, ipiv_offset;
+    gsl_matrix_view gsl_LU, gsl_invA;
+    gsl_permutation * p;
+    int COPY_IPIV;
+    size_t *p_data;
+    if (sizeof(size_t) == sizeof(int))
+        COPY_IPIV = 0;
+    
+    num_LU = NLU[0];
+    LU_rows = NLU[1];
+    LU_offset = LU_rows*LU_rows;
+    ipiv_offset = LU_rows;
+    
+    #pragma omp parallel shared(LU_rows, num_x, LU, LU_offset, x, x_offset, COPY_IPIV, ipiv, ipiv_offset) private(p, p_data, i, gsl_LU, gsl_x, j)
+    {
+    p = gsl_permutation_alloc (LU_rows);
+    p_data = p->data;
+    
+    #pragma omp for
+    for (i=0; i<num_LU; i++) {
+        gsl_LU = gsl_matrix_view_array(LU+(i*LU_offset), LU_rows, LU_rows);
+        gsl_invA = gsl_matrix_view_array(invA+(i*LU_offset), LU_rows, LU_rows);
+        if (!COPY_IPIV)
+            p->data = ipiv+(i*ipiv_offset);
+        else
+            for (j=0; j<LU_rows; j++)
+                p->data[j] = ipiv[i*LU_rows+j];
+        gsl_linalg_LU_invert (&gsl_LU.matrix, p, &gsl_invA.matrix);
+        //for (int j=0; j<LU_rows; j++)
+        //    std::cout << "p["<<j<<"]=" << p->data[j] << "  ipiv["<<j<<"]="<<ipiv[i*LU_offset+j] << std::endl;
+    }
+    p->data = p_data;
+    gsl_permutation_free(p);
+    }
+    """
+    
+    
+###############################################################################
+class dgetrdet:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_la_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["LU", "signum", "det_vec"]
+    code = """
+    int i, j, num_LU;
+    int LU_rows, LU_cols, LU_offset, s;
+    gsl_matrix_view gsl_LU;
+    
+    num_LU = NLU[0];
+    LU_rows = NLU[1];
+    LU_offset = LU_rows*LU_rows;
+    
+    #pragma omp parallel for \
+        shared(LU, LU_offset, LU_rows, signum) private(i, gsl_LU, s)
+    for (i=0; i<num_LU; i++) {
+        gsl_LU = gsl_matrix_view_array(LU+(i*LU_offset), LU_rows, LU_rows);
+        s = signum[i];
+        gsl_linalg_LU_det (&gsl_LU.matrix, s)
+    }
+    """
+
+
+
+###############################################################################
+class dpotrf:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_la_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["A"]
+    code = """
+    int i, num_A;
+    int A_rows, A_cols, A_offset;
+    gsl_matrix_view gsl_A;
+    
+    num_A = NA[0];
+    A_rows = NA[1]; A_cols = NA[2];
+    A_offset = A_rows*A_cols;
+    
+    #pragma omp parallel for shared(num_A, A, A_offset, A_rows) private(i, gsl_A)
+    for (i=0; i<num_A; i++) {
+        gsl_A = gsl_matrix_view_array(A+(i*A_offset), A_rows, A_rows);
+        gsl_linalg_cholesky_decomp (&gsl_A.matrix);
+    }
+    """
+
+
+###############################################################################
+class dpotrsv:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_la_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["cholA", "b", "x"]
+    code = """
+    int i, num_A, num_b, num_x;
+    int A_rows, A_cols, A_offset, b_offset, x_offset;
+    gsl_matrix_view gsl_cholA;
+    gsl_vector_view gsl_x, gsl_b;
+    
+    num_A = NA[0];
+    A_rows = NA[1];
+    A_offset = num_A==1?0:A_rows*A_rows;
+    
+    num_b = Nb[0];
+    b_offset = num_b==1?0:LU_rows;
+    num_x = Nx[0];
+    x_offset = LU_rows;
+    
+    #pragma omp parallel for shared(num_x, cholA, A_offset, A_rows b, b_offset, x, x_offset) private(i, gsl_cholA, gsl_b, gsl_x)
+    for (i=0; i<num_x; i++) {
+        gsl_cholA = gsl_matrix_view_array(cholA+(i*A_offset), A_rows, A_rows);
+        gsl_b = gsl_vector_view_array(b+(i*b_offset), A_rows);
+        gsl_x = gsl_vector_view_array(x+(i*x_offset), A_rows);
+        gsl_linalg_cholesky_solve (&gsl_cholA.matrix, &gsl_b.vector, &gsl_x.vector);
+    }
+    """
+    
+    
+###############################################################################
+class dpotrsvx:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_la_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["cholA", "x"]
+    code = """
+    int i, num_A, num_x;
+    int A_rows, A_cols, A_offset, x_offset;
+    gsl_matrix_view gsl_cholA;
+    gsl_vector_view gsl_x;
+    
+    num_A = NA[0];
+    A_rows = NA[1];
+    A_offset = num_A==1?0:A_rows*A_rows;
+    
+    num_x = Nx[0];
+    x_offset = A_rows;
+    
+    #pragma omp parallel for shared(num_x, cholA, A_offset, A_rows, x, x_offset) private(i, gsl_cholA, gsl_x)
+    for (i=0; i<num_x; i++) {
+        gsl_cholA = gsl_matrix_view_array(cholA+(i*A_offset), A_rows, A_rows);
+        gsl_x = gsl_vector_view_array(x+(i*x_offset), A_rows);
+        gsl_linalg_cholesky_solve (&gsl_cholA.matrix, &gsl_x.vector);
+    }
+    """
+    
+    
+###############################################################################
+class dpotri:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = gsl_la_headers+omp_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl
+    python_vars = ["cholA"]
+    code = """
+    int i, j, num_A;
+    int A_rows, A_cols, A_offset;
+    gsl_matrix_view gsl_cholA;
+    
+    num_A = NA[0];
+    A_rows = NA[1];
+    A_offset = A_rows*A_rows;
+    
+    #pragma omp parallel for shared(numA, cholA, A_offset, A_rows) private(i, gsl_cholA)
+    for (i=0; i<num_A; i++) {
+        gsl_cholA = gsl_matrix_view_array(cholA+(i*A_offset), A_rows, A_rows);
+        gsl_linalg_cholesky_invert (&gsl_cholA.matrix);
+    }
+    """
+    
+    
 ###############################################################################
 class symmetrise:
     def __call__(self):
         return python_vars, code, support_code, libs
     helper_code = """
-    inline void symmetrise_upper(int *M, int *N, double *A) {
+    inline void symmetrise_upper(int M, int N, double *A) {
         int i, j;
         for (i=1; i<M; i++)
             for (j=0; j<i; j++)
                 A[i*N+j] = A[j*N+i];
     }
     
-    inline void symmetrise_lower(int *M, int *N, double *A) {
+    inline void symmetrise_lower(int M, int N, double *A) {
         int i, j;
         for (i=0; i<M-1; i++)
             for (j=i+1; j<N; j++)
@@ -951,7 +1252,7 @@ class symmetrise:
     ncols = NA[2];
     A_offset = nrows*ncols;
     
-    Uplo = std::tolower(UPLO)=='l'?CblasLower:CblasUpper;
+    Uplo = std::tolower(UPLO[0])=='l'?CblasLower:CblasUpper;
     
     #pragma omp parallel private(i, tid)
     {
@@ -963,12 +1264,12 @@ class symmetrise:
     }
     
     #pragma omp parallel for \
-        shared(A, Uplo, A_offset, A_rows, C, C_offset, C_rows, alpha, alpha_offset, beta, beta_offset) private(i, gsl_A, gsl_C)
+        shared(num_A, Uplo, nrows, ncols, A, A_offset) private(i)
     for (i=0; i<num_A; i++) {
         if (Uplo==CblasLower)
-            symmetrise_lower(&nrows, &ncols, A+(i*A_offset))
+            symmetrise_lower(nrows, ncols, A+(i*A_offset));
         else //if (Uplo==CblasUpper)
-            symmetrise_upper(&nrows, &ncols, A+(i*A_offset))
+            symmetrise_upper(nrows, ncols, A+(i*A_offset));
     }
     """
 

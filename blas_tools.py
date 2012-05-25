@@ -315,7 +315,7 @@ def dscal(alpha, x):
 ##
 
 #def dgemv(A, x, alpha=1.0, y=None, beta=1.0, TRANSPOSE_A=False):
-def dgemv(TRANSPOSE_A=False, alpha=1.0, A, x, beta=1.0, y=None):
+def dgemv(A, x, TRANSPOSE_A=False, alpha=1.0, beta=1.0, y=None):
     """
     dgemv --
     y = alpha*A*x + beta*y OR 
@@ -355,7 +355,7 @@ def dgemv(TRANSPOSE_A=False, alpha=1.0, A, x, beta=1.0, y=None):
     return fn_return_val
     
     
-def dtrmv(UPLO, TRANSPOSE_A=False, A, x):
+def dtrmv(UPLO, A, x, TRANSPOSE_A=False):
     """
     dtrmv -- 
     x := A*x  if TRANSPOSE_A=False or   
@@ -375,7 +375,7 @@ def dtrmv(UPLO, TRANSPOSE_A=False, A, x):
                  extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
 
 
-def dtrsv(UPLO, TRANSPOSE_A=False, A, x):
+def dtrsv(UPLO, A, x, TRANSPOSE_A=False):
     """
     dtrsv -- Solve A*x = b,   or   A**T*x = b, A is nxn triangular
     x = A^{-1}*b or x = A^{-T}b
@@ -396,7 +396,7 @@ def dtrsv(UPLO, TRANSPOSE_A=False, A, x):
                  extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
 
 
-def dsymv(UPLO, alpha=1.0, A, x, beta=1.0, y=None):
+def dsymv(UPLO, A, x, alpha=1.0, beta=1.0, y=None):
     """
     dsymv -- y = alpha*A*x + beta*y, A is symmetric
     """
@@ -462,7 +462,7 @@ def dger(x, y, alpha=1.0, A=None):
     return fn_return_val
     
     
-def dsyr(UPLO, alpha=1.0, x, A=None):
+def dsyr(UPLO, x, alpha=1.0, A=None):
     """
     dsyr -- symmetric rank 1 operation
     A = alpha*x*x**T + A,  A is nxn symmetric
@@ -472,12 +472,14 @@ def dsyr(UPLO, alpha=1.0, x, A=None):
     
     fn_return_val = None
     if A==None:
-        A = np.zeros(x.shape + x.shape[1], dtype=float)
+        A = np.zeros(x.shape + (x.shape[1],), dtype=float)
         fn_return_val = A
-    
+    if np.isscalar(alpha):
+        alpha = np.array([alpha], dtype=float)
     if DEBUG:
         assert_valid_matrix(A)
         assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1), NUM_ELEM_MISMATCH
+        assert len(alpha) in [1, x.shape[0]], NUM_ELEM_MISMATCH
         assert A.shape[1]==A.shape[2]==x.shape[1], M_V_DIM_MISMATCH
     
     weave.inline(blas_tools_c_code.dsyr.code, 
@@ -493,7 +495,7 @@ def dsyr(UPLO, alpha=1.0, x, A=None):
 ##
 
 #def dgemm(A, B, alpha=1.0, C=None, beta=1.0, TRANSPOSE_A=False, TRANSPOSE_B=False):
-def dgemm(TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, A, B, beta=1.0, C=None):
+def dgemm(A, B, TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, beta=1.0, C=None):
     """
     dgemm -- matrix-matrix operation, 
     C := alpha*op( A )*op( B ) + beta*C,
@@ -518,8 +520,6 @@ def dgemm(TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, A, B, beta=1.0, C=Non
     
     if DEBUG:
         assert_valid_matrix(C)
-        test_rows = A.shape[2] if TRANSPOSE_A else A.shape[1]
-        test_cols = B.shape[1] if TRANSPOSE_B else B.shape[2]
         assert C.shape == (max([A.shape[0], B.shape[0]]), A_dims[0], B_dims[1]), M_M_DIM_MISMATCH
         assert A_dims[1]==B_dims[0], M_M_DIM_MISMATCH
     
@@ -531,7 +531,7 @@ def dgemm(TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, A, B, beta=1.0, C=Non
     return fn_return_val
 
 
-def dsymm(SIDE='l', UPLO, alpha=1.0, A, B, beta=1.0, C=None):
+def dsymm(A, B, UPLO, SIDE='l', alpha=1.0, beta=1.0, C=None):
     """
     dsymm -- matrix-matrix operation, A is symmetric, B and C are mxn
     C := alpha*A*B + beta*C, if SIDE='l' or
@@ -581,7 +581,7 @@ def dsymm(SIDE='l', UPLO, alpha=1.0, A, B, beta=1.0, C=None):
     return fn_return_val
 
 
-def dsyrk(UPLO, TRANSPOSE_A, alpha=1.0, A, beta=1.0, C=None):
+def dsyrk(UPLO, A, TRANSPOSE_A=False, alpha=1.0, beta=1.0, C=None):
     """
     dsyrk -- symmetric rank k operation, C is symmetric
     C := alpha*A*A**T + beta*C  if TRANSPOSE_A=False or
@@ -597,7 +597,7 @@ def dsyrk(UPLO, TRANSPOSE_A, alpha=1.0, A, beta=1.0, C=None):
         
     fn_return_val = None
     if C==None:
-        C = np.zeros((max([A.shape[0], B.shape[0]]), A_dims[0], A_dims[1]), dtype=float)
+        C = np.zeros((A.shape[0], A_dims[0], A_dims[1]), dtype=float)
         fn_return_val = C
     
     if DEBUG:
@@ -617,12 +617,24 @@ def dsyrk(UPLO, TRANSPOSE_A, alpha=1.0, A, beta=1.0, C=None):
 ##
 
 # Solve Ax = B
-def dgesv():
+def dgesv(A, INPLACE=True):
     pass
 
 # LU decomposition
-def dgetrf():
-    pass
+def dgetrf(A, INPLACE=True):
+    ipiv = np.zeros(A.shape[0:2], dtype=int)
+    signum = np.zeros(A.shape[0])
+    if not INPLACE:
+        A = A.copy()
+        fn_return_val = A, ipiv, signum
+    else:
+        fn_return_val = ipiv, signum
+    weave.inline(blas_tools_c_code.dgetrf.code, 
+                 blas_tools_c_code.dgetrf.python_vars, 
+                 libraries=blas_tools_c_code.dgetrf.libraries,
+                 support_code=blas_tools_c_code.dgetrf.support_code,
+                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    return fn_return_val
 
 # Solve Ax=B using LU decomposition
 def dgetrs():
@@ -655,7 +667,7 @@ def symmetrise(A, UPLO):
         assert_valid_matrix(A, "A")
         assert A.shape[1]==A.shape[2], "A must be symmetric"
         assert type(UPLO)
-        assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'u', 'L', 'U']
+        assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'u', 'L', 'U']"
     weave.inline(blas_tools_c_code.symmetrise.code, 
                  blas_tools_c_code.symmetrise.python_vars, 
                  libraries=blas_tools_c_code.symmetrise.libraries,
