@@ -339,11 +339,11 @@ class dscal:
 class dgemv:
     def __call__(self):
         return python_vars, code, support_code, libs
-    support_code = f77_blas_headers+omp_headers
-    libraries = lptf77blas+llapack+lgomp
+    support_code = gsl_blas_headers+omp_headers
+    libraries = lptf77blas+llapack+lgomp+lgsl
     python_vars = ["A", "x", "y", "alpha", "beta", "TRANSPOSE_A"]
     code = """
-    int i, num_A, num_x, num_alpha, num_beta;
+    int i, num_A, num_x, num_alpha, num_beta, num_y;
     int nrows, ncols, A_offset, x_offset, x_vec_len, alpha_offset, beta_offset, y_offset, y_vec_len;
     CBLAS_TRANSPOSE_t TransA;
     gsl_matrix_view gsl_A;
@@ -354,14 +354,19 @@ class dgemv:
     num_x = Nx[0];
     num_alpha = Nalpha[0];
     num_beta = Nbeta[0];
-    num_y = Ny[0]
+    num_y = Ny[0];
+    
+    nrows = NA[1];
+    ncols = NA[2];
+    x_vec_len = Nx[1];
+    y_vec_len = Ny[1];
     
     A_offset = num_A==1?0:nrows*ncols;
     x_offset = num_x==1?0:Nx[1];
     alpha_offset = !(num_alpha==1);
     beta_offset = !(num_beta==1);
     TransA = (int)TRANSPOSE_A?CblasTrans:CblasNoTrans;
-    if (!TRANSPOSE_A) {
+    if (!(int)TRANSPOSE_A) {
         TransA = CblasNoTrans;
         y_offset = nrows;
     }
@@ -380,13 +385,13 @@ class dgemv:
     }
     
     #pragma omp parallel for \
-        shared(num_y, A, A_offset, nrows, ncols, x, x_offset, x_vec_len, y, y_offset, y_vec_len, alpha, alpha_offset, beta, beta_offset, y) private(i, gsl_A, gsl_x, gsl_y)
+        shared(num_y, A, A_offset, nrows, ncols, x, x_offset, x_vec_len, y, y_offset, y_vec_len, alpha, alpha_offset, beta, beta_offset) private(i, gsl_A, gsl_x, gsl_y)
     for (i=0; i<num_y; i++) {
         gsl_A = gsl_matrix_view_array(A+(i*A_offset), nrows, ncols);
         gsl_x = gsl_vector_view_array(x+(i*x_offset), x_vec_len);
         gsl_y = gsl_vector_view_array(y+(i*y_offset), y_vec_len);
-        gsl_blas_dgemv (TransA, alpha[i*alpha_offset], &A.matrix, &x.vector, 
-                        beta[i*beta_offset], &y.vector);
+        gsl_blas_dgemv (TransA, alpha[i*alpha_offset], &gsl_A.matrix, &gsl_x.vector, 
+                        beta[i*beta_offset], &gsl_y.vector);
     }
     """
     old_python_vars = ["A", "x", "y", "alpha", "beta", "TRANSPOSE_A", "C_CONTIGUOUS"]
@@ -937,7 +942,7 @@ class dgetrf:
 
 
 ###############################################################################
-class dgetrsv:
+class dgetrs:
     def __call__(self):
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
@@ -990,7 +995,7 @@ class dgetrsv:
     
     
 ###############################################################################
-class dgetrsvx:
+class dgetrsx:
     def __call__(self):
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
@@ -1136,7 +1141,7 @@ class dpotrf:
 
 
 ###############################################################################
-class dpotrsv:
+class dpotrs:
     def __call__(self):
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
@@ -1168,7 +1173,7 @@ class dpotrsv:
     
     
 ###############################################################################
-class dpotrsvx:
+class dpotrsx:
     def __call__(self):
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
@@ -1191,7 +1196,7 @@ class dpotrsvx:
     for (i=0; i<num_x; i++) {
         gsl_cholA = gsl_matrix_view_array(cholA+(i*A_offset), A_rows, A_rows);
         gsl_x = gsl_vector_view_array(x+(i*x_offset), A_rows);
-        gsl_linalg_cholesky_solve (&gsl_cholA.matrix, &gsl_x.vector);
+        gsl_linalg_cholesky_svx (&gsl_cholA.matrix, &gsl_x.vector);
     }
     """
     

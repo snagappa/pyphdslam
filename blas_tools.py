@@ -9,23 +9,35 @@ import numpy as np
 import copy
 from scipy import weave
 import blas_tools_c_code
-import phdmisctools
+#import phdmisctools
 #import collections
 
 
 default_dtype = np.float32
 
-def array(*args, **kw):
+def myarray(*args, **kw):
     if 'dtype' not in kw.keys():
         return np.array(*args, dtype=default_dtype, **kw)
     else:
         return np.array(*args, **kw) 
+
 
 DEBUG = True
 NUM_ELEM_MISMATCH = "  *Did not recieve correct number of elements*  "
 V_V_DIM_MISMATCH = "  *Vectors have incompatible dimensions*  "
 M_V_DIM_MISMATCH = "  *Matrix and vector have incompatible dimensions*  "
 M_M_DIM_MISMATCH = "  *Matrices have incompatible dimensions*  "
+
+
+def blas_weaver(subroutine_string):
+    subroutine = getattr(blas_tools_c_code, subroutine_string)
+    compile_args = getattr(blas_tools_c_code, "EXTRA_COMPILE_ARGS", [])
+    compile_args += getattr(subroutine, "extra_compile_args", [])
+    
+    fn_string = "blas_tools_c_code."+subroutine_string
+    exec_string = "weave.inline(" + fn_string + ".code, " + fn_string+".python_vars" + ", libraries=" + fn_string + ".libraries" + ", support_code=" + fn_string + ".support_code" + ", extra_compile_args=" + str(compile_args) + ")"
+    return exec_string
+                 
 
 global_support_code = """
 #include <atlas/cblas.h>
@@ -197,11 +209,7 @@ def fast_copy(x):
             y = copy.copy(x)
         else:
             y = np.empty(itis.shape, dtype=itis.base_type).tolist()
-            weave.inline(blas_tools_c_code.lcopy.code, 
-                     blas_tools_c_code.lcopy.python_vars, 
-                     libraries=blas_tools_c_code.lcopy.libraries,
-                     support_code=blas_tools_c_code.lcopy.support_code,
-                     extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+            exec blas_weaver("lcopy")
     elif consistent_type == np.ndarray:
         y = x.copy()
     elif consistent_type == LIST_OF_NDARRAY:
@@ -218,11 +226,7 @@ def ddot(x, y):
         assert (x.shape[0] in [1, y.shape[0]]) and (y.shape[0] in [1, x.shape[0]]), NUM_ELEM_MISMATCH
         assert (x.shape[1] == y.shape[1]), V_V_DIM_MISMATCH
     xt_dot_y = np.zeros(max([x.shape[0], y.shape[0]]), dtype=float)
-    weave.inline(blas_tools_c_code.ddot.code,
-                 blas_tools_c_code.ddot.python_vars, 
-                 libraries=blas_tools_c_code.ddot.libraries,
-                 support_code=blas_tools_c_code.ddot.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("ddot")
     return xt_dot_y
     
     
@@ -231,11 +235,7 @@ def dnrm2(x):
         assert_valid_vector(x, "x")
     
     nrm2 = np.zeros(x.shape[0], dtype=float)
-    weave.inline(blas_tools_c_code.dnrm2.code,
-                 blas_tools_c_code.dnrm2.python_vars, 
-                 libraries=blas_tools_c_code.dnrm2.libraries,
-                 support_code=blas_tools_c_code.dnrm2.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("dnrm2")
     return nrm2
 
 
@@ -244,11 +244,7 @@ def dasum(x):
         assert_valid_vector(x)
     
     asum = np.zeros(x.shape[0], dtype=float)
-    weave.inline(blas_tools_c_code.dasum.code,
-                 blas_tools_c_code.dasum.python_vars, 
-                 libraries=blas_tools_c_code.dasum.libraries,
-                 support_code=blas_tools_c_code.dasum.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("dasum")
     return asum
     
     
@@ -257,11 +253,7 @@ def idamax(x):
         assert_valid_vector(x, "x")
     
     max_idx = np.empty(x.shape[0], dtype=int)
-    weave.inline(blas_tools_c_code.idamax.code,
-                 blas_tools_c_code.idamax.python_vars, 
-                 libraries=blas_tools_c_code.idamax.libraries,
-                 support_code=blas_tools_c_code.idamax.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("idamax")
     return max_idx
     
     
@@ -278,17 +270,12 @@ def daxpy(alpha, x, y=None):
         assert x.shape == y.shape, NUM_ELEM_MISMATCH+V_V_DIM_MISMATCH
     
     if np.isscalar(alpha):
-        alpha = np.array([alpha])
+        alpha = np.array([alpha], dtype=float)
     
     if DEBUG:
         assert len(alpha) in [1, x.shape[0]], V_V_DIM_MISMATCH
     
-    weave.inline(blas_tools_c_code.daxpy.code,
-                 blas_tools_c_code.daxpy.python_vars, 
-                 libraries=blas_tools_c_code.daxpy.libraries,
-                 support_code=blas_tools_c_code.daxpy.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS,
-                 verbose=1)
+    exec blas_weaver("daxpy")
     return fn_return_val
     
     
@@ -297,17 +284,13 @@ def dscal(alpha, x):
         assert_valid_vector(x)
     
     if np.isscalar(alpha):
-        alpha = np.array([alpha])
-    alpha = alpha.astype(float)
+        alpha = np.array([alpha], dtype=float)
     
     if DEBUG:
         assert len(alpha) in (1, x.shape[0]), V_V_DIM_MISMATCH
     
-    weave.inline(blas_tools_c_code.dscal.code,
-                 blas_tools_c_code.dscal.python_vars, 
-                 libraries=blas_tools_c_code.dscal.libraries,
-                 support_code=blas_tools_c_code.dscal.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("dscal")
+    
     
 
 ##
@@ -346,12 +329,7 @@ def dgemv(A, x, TRANSPOSE_A=False, alpha=1.0, beta=1.0, y=None):
         else:
             assert A.shape[1] == x.shape[1], M_V_DIM_MISMATCH
         assert len(beta) in [1, y.shape[0]], NUM_ELEM_MISMATCH
-    
-    weave.inline(blas_tools_c_code.dgemv.code, 
-                 blas_tools_c_code.dgemv.python_vars, 
-                 libraries=blas_tools_c_code.dgemv.libraries,
-                 support_code=blas_tools_c_code.dgemv.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("dgemv")
     return fn_return_val
     
     
@@ -367,13 +345,9 @@ def dtrmv(UPLO, A, x, TRANSPOSE_A=False):
         assert_valid_vector(x, "x")
         assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1) or (A.shape[0]==1), NUM_ELEM_MISMATCH
         assert A.shape[2] == x.shape[1], M_V_DIM_MISMATCH
-        
-    weave.inline(blas_tools_c_code.dtrmv.code, 
-                 blas_tools_c_code.dtrmv.python_vars, 
-                 libraries=blas_tools_c_code.dtrmv.libraries,
-                 support_code=blas_tools_c_code.dtrmv.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
-
+    
+    exec blas_weaver("dtrmv")
+    
 
 def dtrsv(UPLO, A, x, TRANSPOSE_A=False):
     """
@@ -388,13 +362,9 @@ def dtrsv(UPLO, A, x, TRANSPOSE_A=False):
             assert A.shape[1] == x.shape[1], M_V_DIM_MISMATCH
         else:
             assert A.shape[2] == x.shape[1], M_V_DIM_MISMATCH
-        
-    weave.inline(blas_tools_c_code.dtrsv.code, 
-                 blas_tools_c_code.dtrsv.python_vars, 
-                 libraries=blas_tools_c_code.dtrsv.libraries,
-                 support_code=blas_tools_c_code.dtrsv.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
-
+    
+    exec blas_weaver("dtrsv")
+    
 
 def dsymv(UPLO, A, x, alpha=1.0, beta=1.0, y=None):
     """
@@ -421,12 +391,7 @@ def dsymv(UPLO, A, x, alpha=1.0, beta=1.0, y=None):
         assert A.shape[2] == x.shape[1], M_V_DIM_MISMATCH
         assert len(beta) in [1, y.shape[0]], NUM_ELEM_MISMATCH
     
-    weave.inline(blas_tools_c_code.dsymv.code, 
-                 blas_tools_c_code.dsymv.python_vars, 
-                 libraries=blas_tools_c_code.dsymv.libraries,
-                 support_code=blas_tools_c_code.dsymv.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
-                 
+    exec blas_weaver("dsymv")
     return fn_return_val
     
     
@@ -450,15 +415,11 @@ def dger(x, y, alpha=1.0, A=None):
     if np.isscalar(alpha):
         alpha = np.array([alpha], dtype=float)
     if DEBUG:
-        assert_valid_vector(alpha, "alpha")
+        #assert_valid_vector(alpha, "alpha")
         assert len(alpha) in [1, x.shape[0], y.shape[0]], NUM_ELEM_MISMATCH
         assert (x.shape[0]==y.shape[0]) or (x.shape[0]==1) or (y.shape[0]==1), NUM_ELEM_MISMATCH
     
-    weave.inline(blas_tools_c_code.dger.code, 
-                 blas_tools_c_code.dger.python_vars, 
-                 libraries=blas_tools_c_code.dger.libraries,
-                 support_code=blas_tools_c_code.dger.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("dger")
     return fn_return_val
     
     
@@ -482,11 +443,7 @@ def dsyr(UPLO, x, alpha=1.0, A=None):
         assert len(alpha) in [1, x.shape[0]], NUM_ELEM_MISMATCH
         assert A.shape[1]==A.shape[2]==x.shape[1], M_V_DIM_MISMATCH
     
-    weave.inline(blas_tools_c_code.dsyr.code, 
-                 blas_tools_c_code.dsyr.python_vars, 
-                 libraries=blas_tools_c_code.dsyr.libraries,
-                 support_code=blas_tools_c_code.dsyr.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("dsyr")
     return fn_return_val
 
 
@@ -518,16 +475,22 @@ def dgemm(A, B, TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, beta=1.0, C=Non
         C = np.zeros((max([A.shape[0], B.shape[0]]), A_dims[0], B_dims[1]), dtype=float)
         fn_return_val = C
     
+    if np.isscalar(alpha):
+        alpha = np.array([alpha], dtype=float)
+    if np.isscalar(beta):
+        beta = np.array([beta], dtype=float)
+        
     if DEBUG:
         assert_valid_matrix(C)
-        assert C.shape == (max([A.shape[0], B.shape[0]]), A_dims[0], B_dims[1]), M_M_DIM_MISMATCH
+        if A.shape[0] == B.shape[0]==1:
+            assert C.shape[1:] == (A_dims[0], B_dims[1]), NUM_ELEM_MISMATCH
+        else:
+            assert C.shape == (max([A.shape[0], B.shape[0]]), A_dims[0], B_dims[1]), M_M_DIM_MISMATCH
         assert A_dims[1]==B_dims[0], M_M_DIM_MISMATCH
+        assert len(alpha) in [1, A.shape[0], B.shape[0]], NUM_ELEM_MISMATCH
+        assert len(beta) in [1, C.shape[0]], NUM_ELEM_MISMATCH
     
-    weave.inline(blas_tools_c_code.dgemm.code, 
-                 blas_tools_c_code.dgemm.python_vars, 
-                 libraries=blas_tools_c_code.dgemm.libraries,
-                 support_code=blas_tools_c_code.dgemm.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("dgemm")
     return fn_return_val
 
 
@@ -538,24 +501,21 @@ def dsymm(A, B, UPLO, SIDE='l', alpha=1.0, beta=1.0, C=None):
     C := alpha*B*A + beta*C, if SIDE='r'
     UPLO = 'l' or 'u'
     """
+    if np.isscalar(alpha):
+        alpha = np.array([alpha], dtype=float)
     if DEBUG:
         assert SIDE in ['l', 'L', 'r', 'R'], "SIDE must be one of ['l', 'L', 'r', 'R']"
         assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'L', 'u', 'U']"
         assert_valid_matrix(A, "A")
         assert_valid_matrix(B, "B")
         assert A.shape[0] in [1, B.shape[0]] and B.shape[0] in [1, A.shape[0]], NUM_ELEM_MISMATCH
-    
-    if np.isscalar(alpha):
-        alpha = np.array([alpha], dtype=float)
-    if DEBUG:
-        assert_valid_vector(alpha, "alpha")
         assert len(alpha) in [1, A.shape[0], B.shape[0]], NUM_ELEM_MISMATCH
             
     A_dims = list(A.shape[1:])
     B_dims = list(B.shape[1:])
     
     if np.isscalar(beta):
-        alpha = np.array([beta], dtype=float)
+        beta = np.array([beta], dtype=float)
     fn_return_val = None
     if C==None:
         if SIDE=='l':
@@ -570,14 +530,9 @@ def dsymm(A, B, UPLO, SIDE='l', alpha=1.0, beta=1.0, C=None):
             assert C.shape == (max([A.shape[0], B.shape[0]]), A_dims[0], B_dims[1]), NUM_ELEM_MISMATCH+M_M_DIM_MISMATCH
         else:
             assert C.shape == (max([A.shape[0], B.shape[0]]), B_dims[0], A_dims[1]), NUM_ELEM_MISMATCH+M_M_DIM_MISMATCH
-        assert_valid_vector(beta, "beta")
         assert len(beta) in [1, C.shape[0]], NUM_ELEM_MISMATCH
     
-    weave.inline(blas_tools_c_code.dsymm.code, 
-                 blas_tools_c_code.dsymm.python_vars, 
-                 libraries=blas_tools_c_code.dsymm.libraries,
-                 support_code=blas_tools_c_code.dsymm.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("dsymm")
     return fn_return_val
 
 
@@ -587,28 +542,30 @@ def dsyrk(UPLO, A, TRANSPOSE_A=False, alpha=1.0, beta=1.0, C=None):
     C := alpha*A*A**T + beta*C  if TRANSPOSE_A=False or
     C := alpha*A**T*A + beta*C  if TRANSPOSE_A=True
     """
-    if DEBUG:
-        assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'L', 'u', 'U']"
-        assert_valid_matrix(A, "A")
-    
     A_dims = list(A.shape[1:])
     if TRANSPOSE_A:
         A_dims.reverse()
-        
+    if np.isscalar(alpha):
+        alpha = np.array([alpha], dtype=float)
+    
+    if DEBUG:
+        assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'L', 'u', 'U']"
+        assert_valid_matrix(A, "A")
+        assert alpha.shape[0] in [1, A.shape[0]], NUM_ELEM_MISMATCH
+    
     fn_return_val = None
     if C==None:
         C = np.zeros((A.shape[0], A_dims[0], A_dims[1]), dtype=float)
         fn_return_val = C
-    
+    if np.isscalar(beta):
+        beta = np.array([beta], dtype=float)
+        
     if DEBUG:
         assert_valid_matrix(C)
         assert C.shape == (A.shape[0], A_dims[0], A_dims[0]), M_M_DIM_MISMATCH
+        assert beta.shape[0] in [1, C.shape[0]], NUM_ELEM_MISMATCH
     
-    weave.inline(blas_tools_c_code.dsyrk.code, 
-                 blas_tools_c_code.dsyrk.python_vars, 
-                 libraries=blas_tools_c_code.dsyrk.libraries,
-                 support_code=blas_tools_c_code.dsyrk.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("dsyrk")
     return fn_return_val
 
 
@@ -616,12 +573,10 @@ def dsyrk(UPLO, A, TRANSPOSE_A=False, alpha=1.0, beta=1.0, C=None):
 ## LINEAR ALGEBRA
 ##
 
-# Solve Ax = B
-def dgesv(A, INPLACE=True):
-    pass
-
 # LU decomposition
-def dgetrf(A, INPLACE=True):
+def dgetrf(A, INPLACE=False):
+    if DEBUG:
+        assert_valid_matrix(A, "A")
     ipiv = np.zeros(A.shape[0:2], dtype=int)
     signum = np.zeros(A.shape[0])
     if not INPLACE:
@@ -629,39 +584,184 @@ def dgetrf(A, INPLACE=True):
         fn_return_val = A, ipiv, signum
     else:
         fn_return_val = ipiv, signum
-    weave.inline(blas_tools_c_code.dgetrf.code, 
-                 blas_tools_c_code.dgetrf.python_vars, 
-                 libraries=blas_tools_c_code.dgetrf.libraries,
-                 support_code=blas_tools_c_code.dgetrf.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    
+    exec blas_weaver("dgetrf")
     return fn_return_val
 
+
 # Solve Ax=B using LU decomposition
-def dgetrs():
-    pass
+def dgetrs(LU, ipiv, b, x=None):
+    if DEBUG:
+        assert_valid_matrix(LU, "LU")
+        assert_valid_vector(ipiv, "ipiv")
+        assert_valid_vector(b, "b")
+        assert ipiv.shape[0] == LU.shape[0], NUM_ELEM_MISMATCH
+        assert LU.shape[1] == ipiv.shape[1], M_M_DIM_MISMATCH
+        assert LU.shape[0] in [1, b.shape[0]] and b.shape[0] in [1, LU.shape[0]], NUM_ELEM_MISMATCH
+        assert LU.shape[2] == b.shape[1], M_V_DIM_MISMATCH
+    
+    fn_return_val = None
+    if x==None:
+        x = np.zeros((max([LU.shape[0], b.shape[0]]), b.shape[1]), dtype=float)
+        fn_return_val = x
+    if DEBUG:
+        assert_valid_vector(x, "x")
+        assert x.shape == (max([LU.shape[0], b.shape[0]]), b.shape[1]), NUM_ELEM_MISMATCH+V_V_DIM_MISMATCH
+    
+    exec blas_weaver("dgetrs")
+    return fn_return_val
 
-# Compute inverse using LU decomposition from dgetrf
-def dgetri():
-    pass
+
+# Solve Ax=B using LU decomposition in place
+def dgetrsx(LU, ipiv, b):
+    if DEBUG:
+        assert_valid_matrix(LU, "LU")
+        assert_valid_vector(ipiv, "ipiv")
+        assert_valid_vector(b, "b")
+        assert ipiv.shape[0] == LU.shape[0], NUM_ELEM_MISMATCH
+        assert LU.shape[1] == ipiv.shape[1], M_M_DIM_MISMATCH
+        assert LU.shape[0] in [1, b.shape[0]], NUM_ELEM_MISMATCH
+        assert LU.shape[2] == b.shape[1], M_V_DIM_MISMATCH
+    
+    exec blas_weaver("dgetrsx")
+    
+
+def dgetri(LU, ipiv):
+    if DEBUG:
+        assert_valid_matrix(LU, "LU")
+        assert_valid_vector(ipiv, "ipiv")
+        assert LU.shape[0] == ipiv.shape[0], NUM_ELEM_MISMATCH
+        assert LU.shape[1] == ipiv.shape[1], M_M_DIM_MISMATCH
+    invA = np.zeros(LU.shape, dtype=float)
+    exec blas_weaver("dgetri")
+    return invA
 
 
-# Solve for positive definite matrix
-def dposv():
-    pass
+# Solve Ax = B
+def dgesv(A, b, INPLACE=False, OVERWRITE_A=False):
+    if DEBUG:
+        assert_valid_matrix(A, "A")
+        assert_valid_vector(b, "b")
+        if INPLACE:
+            assert A.shape[0] in [1, b.shape[0]]
+    fn_return_val = ()
+    if not OVERWRITE_A:
+        A = A.copy()
+        fn_return_val += (A,)
+    else:
+        fn_return_val += (None,)
+    ipiv, signum = dgetrf(A, INPLACE=True)
+    fn_return_val += (ipiv, signum)
+    if not INPLACE:
+        x = dgetrs(A, ipiv, b)
+        fn_return_val += (x,)
+    else:
+        dgetrsx(A, ipiv, b)
+        fn_return_val += (None,)
+    return fn_return_val
+    
 
+def dgetrdet(LU, signum):
+    if DEBUG:
+        assert_valid_matrix(LU)
+        assert signum.shape[0] == LU.shape[0], NUM_ELEM_MISMATCH
+    det_vec = np.zeros(LU.shape[0])
+    exec blas_weaver("dgetrdet")
+    return det_vec
+    
+    
 # Cholesky decomposition
-def dpotrf():
-    pass
+def dpotrf(A, INPLACE=False):
+    if DEBUG:
+        assert_valid_matrix(A, "A")
+    fn_return_val = None
+    if not INPLACE:
+        A = A.copy()
+        fn_return_val = A
+    exec blas_weaver("dpotrf")
+    return fn_return_val
+
 
 # Solve using Cholesky decomposition
-def dpotrs():
-    pass
+def dpotrs(cholA, b, x=None):
+    if DEBUG:
+        assert_valid_matrix(cholA, "cholA")
+        assert_valid_vector(b, "b")
+        assert cholA.shape[0] in [1, b.shape[0]] and b.shape[0] in [1, cholA.shape[0]], NUM_ELEM_MISMATCH
+        assert cholA.shape[2] == b.shape[1], M_V_DIM_MISMATCH
+    
+    fn_return_val = None
+    if x==None:
+        x = np.zeros((max([cholA.shape[0], b.shape[0]]), b.shape[1]), dtype=float)
+        fn_return_val = x
+    if DEBUG:
+        assert_valid_vector(x, "x")
+        assert x.shape == (max([cholA.shape[0], b.shape[0]]), b.shape[1]), NUM_ELEM_MISMATCH+V_V_DIM_MISMATCH
+    
+    exec blas_weaver("dpotrs")
+    return fn_return_val
+
+
+# Solve Ax=B using LU decomposition in place
+def dpotrsx(cholA, b):
+    if DEBUG:
+        assert_valid_matrix(cholA, "cholA")
+        assert_valid_vector(b, "b")
+        assert cholA.shape[0] in [1, b.shape[0]], NUM_ELEM_MISMATCH
+        assert cholA.shape[2] == b.shape[1], M_V_DIM_MISMATCH
+    
+    exec blas_weaver("dpotrsx")
+
 
 # Compute inverse using Cholesky factorisation from dpotrf
-def dpotri():
-    pass
+def dpotri(A, INPLACE=False):
+    if DEBUG:
+        assert_valid_matrix(A)
+    fn_return_val = None
+    if not INPLACE:
+        A = A.copy()
+        fn_return_val = A
+    exec blas_weaver("dpotri")
+    return fn_return_val
+    
 
+# Solve for positive definite matrix
+def dposv(A, b, INPLACE=False, OVERWRITE_A=False):
+    if DEBUG:
+        assert_valid_matrix(A, "A")
+        assert_valid_vector(b, "b")
+        if INPLACE:
+            assert A.shape[0] in [1, b.shape[0]]
+    fn_return_val = ()
+    if not OVERWRITE_A:
+        A = A.copy()
+        fn_return_val += (None,)
+    else:
+        fn_return_val += (A,)
+    dpotrf(A, INPLACE=True)
+    
+    if not INPLACE:
+        x = dpotrs(A, b)
+        fn_return_val += (x,)
+    else:
+        dpotrsx(A, b)
+        fn_return_val += (None,)
+    return fn_return_val
+    
 
+def inverse(A, FACTORISATION, INPLACE=False):
+    assert FACTORISATION[0] in ["c", "C", "l", "L"], "Factorisation must be either 'c' - cholesky or 'l' - LU"
+    if not INPLACE:
+        A = A.copy()
+    if FACTORISATION[0] in ["c", "C"]:
+        dpotrf(A, True)
+        dpotri(A, True)
+    else:
+        ipiv, signum = dgetrf(A, True)
+        dgetri(A, ipiv)
+    return A
+    
+            
 def symmetrise(A, UPLO):
     if DEBUG:
         assert_valid_matrix(A, "A")
@@ -851,6 +951,29 @@ def test_dgemv(num_elements=1000, num_dims=4, num_rows=4):
     max_err1 = np.max(np.abs(np_result - np_dgemv_result))
     print "Maximum error = ", max_err1, " for np_arrays"
     
+def test_dtrmv(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dtrsv(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dsymv(num_elements=1000, num_dims=4):
+    alpha = np.random.rand(num_elements)
+    beta = np.random.rand(num_elements)
+    A = np.zeros((num_elements, num_dims, num_dims))
+    dgemm(np.array([np.eye(num_dims)]), np.array([np.eye(num_dims)]), C=A)
+    x = np.random.rand(num_elements, num_dims)
+    dger(x, x, A=A)
+    y_orig = np.random.rand(num_elements, num_dims)
+    y = y_orig.copy()
+    # Using numpy only
+    np_result = np.array([alpha[i]*np.dot(A[i], x[i])+beta[i]*y[i] for i in range(num_elements)]).squeeze()
+    # Using dgemv with numpy style arrays
+    dsymv('l', A, x, alpha, beta, y)
+    max_err1 = np.max(np.abs(np_result - y.squeeze()))
+    print "Maximum error = ", max_err1, " for np_arrays"
+
+
 def test_dger(num_elements=1000, dims_x=4, dims_y=2):
     x = np.random.rand(num_elements, dims_x)
     y = np.random.rand(num_elements, dims_y)
@@ -861,6 +984,9 @@ def test_dger(num_elements=1000, dims_x=4, dims_y=2):
     max_err = np.max(np.abs(np_dger.squeeze()-A.squeeze()))
     print "Maximum error = ", max_err
     
+def test_dsyr(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
 def test_dgemm(num_elements=1000, rows_A=4, cols_A=2, cols_B=6):
     alpha = np.random.rand(num_elements)
     A = np.random.rand(num_elements, rows_A, cols_A)
@@ -870,6 +996,45 @@ def test_dgemm(num_elements=1000, rows_A=4, cols_A=2, cols_B=6):
     
     
     np_dgemm = np.array([np.array(alpha[i]*np.dot(A[i], B[i])) + beta[i]*C[i] for i in range(num_elements)])
-    dgemm(A, B, alpha, C, beta)
+    dgemm(A, B, alpha=alpha, beta=beta, C=C)
     max_err = np.max(np.abs(np_dgemm.squeeze()-C.squeeze()))
     print "Maximum error = ", max_err
+    
+def test_dsymm(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dsyrk(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dgetrf(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dgetrs(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dgetrsx(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dgetri(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dgesv(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dgetrdet(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dpotrf(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dpotrs(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dpotrsx(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dpotri(num_elements=1000, num_dims=4, num_rows=4):
+    pass
+
+def test_dposv(num_elements=1000, num_dims=4, num_rows=4):
+    pass
