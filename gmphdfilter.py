@@ -26,9 +26,56 @@ import numpy as np
 from phdfilter import PHD, fn_params
 import phdmisctools
 import copy
+import collections
+import blas_tools
+
 
 def placeholder():
     return (lambda:0)
+
+GMSAMPLE = collections.namedtuple("GMSAMPLE", "state covariance")
+
+class GMSTATES():
+    def __init__(self, num_states, ndims=0):
+        self._state_ = np.zeros((num_states, ndims))
+        self._covariance_ = np.zeros((num_states, ndims, ndims))
+        
+    def append(self, new_state):
+        if self._state_.shape[0] == 0 or self._shape_.shape[1] == 0:
+            self._state_ = new_state._state_.copy()
+            self._covariance_ = new_state._covariance.copy()
+        else:
+            self._state_ = np.append(self._state_, new_state._state_)
+            self._covariance_ = np.append(self._covariance_, new_state._covariance_)
+        
+    def copy(self):
+        state_copy = GMSTATES(0)
+        state_copy._state_ = self._state_.copy()
+        state_copy._covariance = self._covariance_
+        return state_copy
+    
+    def select(self, idx_vector, COPY=True):
+        fn_return_val = None
+        if COPY:
+            state_copy = GMSTATES(0)
+            state_copy._state_ = self._state_[idx_vector].copy()
+            state_copy._covariance_ = self._covariance_[idx_vector].copy()
+            fn_return_val = state_copy
+        else:
+            self._state_ = self._state_[idx_vector]
+            self._covariance_ = self._covariance_[idx_vector]
+        return fn_return_val
+        
+    def __getitem__(self, index):
+        return GMSAMPLE(self._state_[index].copy(), self._covariance_[index].copy())
+    
+    def __setitem__(self, key, item):
+        self._state_[key] = item[0]
+        self._covariance_[key] = item[1]
+        
+    def __len__(self):
+        return self._state_.shape[0]
+    
 
 
 class GMPHD(PHD):
@@ -41,7 +88,8 @@ class GMPHD(PHD):
         super(GMPHD, self).__init__(markov_predict_fn, obs_fn, likelihood_fn,
                                     state_update_fn, clutter_fn, birth_fn,
                                     ps_fn, pd_fn, estimate_fn, phd_parameters)
-        
+        self.states = GMSTATES(0)
+        self._states_ = GMSTATES(0)
     
     #def phdGenerateBirth(self, observation_set):
     #    birth_states, birth_weights = \
@@ -65,7 +113,7 @@ class GMPHD(PHD):
         clutter_pdf = self.parameters.clutter_fn.handle(observation_set, 
                                         self.parameters.clutter_fn.parameters)
         # Account for missed detection
-        self._states_ = copy.deepcopy(self.states)
+        self._states_ = self.states.copy()
         self._weights_ = [self.weights*(1-detection_probability)]
         
         # Scale the weights by detection probability -- same for all detection terms
@@ -208,7 +256,16 @@ class GMPHD(PHD):
         self.phdFlattenUpdate()
         return estimates
     
-
+def blas_KF_predict(state, covariance, F, Q, B=None, u=None):
+    pred_state = blas_tools.dgemv(F, state)
+    if (not B==None) and (not u==None):
+        blas_tools.dgemv(B, u, y=pred_state)
+    # Repeat Q n times and return as the predicted covariance
+    Q = np.repeat(np.array([Q]), state.shape[0], 0)
+    blas_tools.dgemm(F, blas_tools.dgemm(covariance, F, TRANSPOSE_B=True), C=Q)
+    return pred_state, Q
+    
+    
 def kalman_predict(x, P, F, Q):
     num_x = len(x)
     if len(F) == 1:

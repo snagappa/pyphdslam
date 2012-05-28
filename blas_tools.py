@@ -292,7 +292,22 @@ def dscal(alpha, x):
     exec blas_weaver("dscal")
     
     
-
+def dcopy(x, y):
+    if DEBUG:
+        assert_valid_vector(x, "x")
+        assert_valid_vector(y, "y")
+        assert x.shape==y.shape, NUM_ELEM_MISMATCH+V_V_DIM_MISMATCH
+    exec blas_weaver("dcopy")
+    
+    
+def _dcopy_(x, y, vec_len=None, x_offset=0, y_offset=0):
+    num_x = np.prod(x.shape)
+    num_y = np.prod(y.shape)
+    if vec_len==None:
+        vec_len = num_x
+    assert x_offset+vec_len < num_x and y_offset+vec_len < num_y, NUM_ELEM_MISMATCH
+    exec blas_weaver("_dcopy_")
+    
 ##
 ## LEVEL 2 BLAS
 ##

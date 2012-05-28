@@ -328,6 +328,48 @@ class dscal:
     """
 
 
+class dcopy:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = f77_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp
+    python_vars = ["x", "y"]
+    code = """
+    int i, num_x;
+    int vec_len, x_offset, inc;
+    
+    inc = 1;
+    num_x = Nx[0];
+    vec_len = Nx[1];
+    
+    #pragma omp parallel shared(nthreads) private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_x, vec_len, x, x_offset, inc) private(i)
+    for (i=0; i<num_x;i++)
+        dcopy_(&vec_len, x+(i*x_offset), 1, y+(i*y_offset), 1);
+    """
+    
+
+class _dcopy_:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = f77_blas_headers+omp_headers
+    libraries = lptf77blas+lgomp
+    python_vars = ["x", "y", "vec_len", "x_offset", "y_offset"]
+    code = """
+    dcopy_(&vec_len, x+x_offset, 1, y+y_offset, 1);
+    """
+    
+    
+    
 ###############################################################################
 ##
 ## LEVEL 2 BLAS Functions

@@ -49,6 +49,38 @@ def fn_params(handle=None, parameters=None):
     return fn
     
 
+class STATES(object):
+    def __init__(self, num_states, ndims=0):
+        self._state_ = np.zeros(num_states, ndims)
+        
+    def append(self, new_state):
+        if self._state_.shape[0] == 0 or self._shape_.shape[1] == 0:
+            self._state_ = new_state._state_.copy()
+        else:
+            self._state_ = np.append(self._state_, new_state._state_)
+        
+    def copy(self):
+        state_copy = STATES(0)
+        state_copy._state_ = self._state_.copy()
+        return state_copy
+    
+    def select(self, idx_vector, COPY=True):
+        fn_return_val = None
+        if COPY:
+            state_copy = STATES(0)
+            state_copy._state_ = self._state_[idx_vector]
+            fn_return_val = state_copy
+        else:
+            self._state_ = self._state_[idx_vector]
+        return fn_return_val
+        
+    def __getitem__(self, index):
+        return self._state_[index].copy()
+    
+    def __setitem__(self, key, item):
+		self._state_[key] = item
+    
+
 class PHD(object):
     def __init__(self, markov_predict_fn, obs_fn, likelihood_fn, 
                  state_update_fn, clutter_fn, birth_fn, ps_fn, pd_fn,
@@ -80,16 +112,16 @@ class PHD(object):
         # Other PHD parameters
         self.parameters.phd_parameters = phd_parameters
         
-        self.states = []
+        self.states = STATES(0)
         self.weights = np.array([])
-        self._states_ = []
+        self._states_ = STATES(0)
         self._weights_ = np.array([])
         
     
     def init(self, states, weights):
         self.states = states
         self.weights = weights
-        self._states_ = copy.deepcopy(states)
+        self._states_ = states.copy()
         self._weights_ = weights.copy()
         
     
@@ -129,7 +161,7 @@ class PHD(object):
         
         
     def phdAppendBirth(self, birth_states, birth_weights):
-        self.states += birth_states
+        self.states.append(birth_states)
         self.weights = np.append(self.weights, birth_weights)
     
     
@@ -146,7 +178,7 @@ class PHD(object):
                        for _observation_ in observation_set]
         
         # Account for missed detection and duplicate the state num_obs times
-        self._states_ = [copy.deepcopy(self.states) for count in range(num_observations+1)]
+        [self._states_.append(self.states.copy()) for count in range(num_observations+1)]
         self._weights_ = [self.weights*(1-detection_probability)]
         
         # Scale the weights by detection probability -- same for all detection terms
@@ -171,16 +203,17 @@ class PHD(object):
     
     def phdFlattenUpdate(self):
         self.weights = np.array(self._weights_).flatten()
-        self.states = []
+        self.states = STATES(0)
         for counter in range(len(self._states_)):
-            self.states += self._states_[counter]
+            self.states.append(self._states_[counter])
         
         
     def phdPrune(self):
         if self.parameters.phd_parameters['elim_threshold'] <= 0:
             return
         retain_indices = np.flatnonzero(np.array([_weights_.sum() for _weights_ in self._weights_])>=self.parameters.phd_parameters['elim_threshold'])
-        pruned_states = [self._states_[ri] for ri in retain_indices]
+        pruned_states = STATES(0)
+        [pruned_states.append(self._states_[ri]) for ri in retain_indices]
         pruned_weights = [self._weights_[ri] for ri in retain_indices]
         self._states_ = pruned_states
         self._weights_ = pruned_weights
