@@ -40,6 +40,23 @@ class GMSTATES():
         self._state_ = np.zeros((num_states, ndims))
         self._covariance_ = np.zeros((num_states, ndims, ndims))
         
+    def set(self, state, covariance, CREATENEWCOPY=False):
+        if CREATENEWCOPY:
+            self._state_ = state.copy()
+            self._covariance_ = covariance.copy()
+        else:
+            self._state_ = state
+            self._covariance_ = covariance
+    
+    def members(self):
+        return self._state_, self._covariance_
+        
+    def state(self):
+        return self._state_
+        
+    def covariance(self):
+        return self._covariance
+        
     def append(self, new_state):
         if self._state_.shape[0] == 0 or self._shape_.shape[1] == 0:
             self._state_ = new_state._state_.copy()
@@ -54,18 +71,32 @@ class GMSTATES():
         state_copy._covariance = self._covariance_
         return state_copy
     
-    def select(self, idx_vector, COPY=True):
+    def select(self, idx_vector, INPLACE=True):
         fn_return_val = None
-        if COPY:
+        if not INPLACE:
             state_copy = GMSTATES(0)
-            state_copy._state_ = self._state_[idx_vector].copy()
-            state_copy._covariance_ = self._covariance_[idx_vector].copy()
-            fn_return_val = state_copy
         else:
-            self._state_ = self._state_[idx_vector]
-            self._covariance_ = self._covariance_[idx_vector]
+            state_copy = self
+            fn_return_val = state_copy
+        
+        state_copy._state_ = self._state_[idx_vector]
+        state_copy._covariance_ = self._covariance_[idx_vector]
         return fn_return_val
         
+    
+    def delete(self, idx_vector, INPLACE=True):
+        fn_return_val = None
+        if not INPLACE:
+            state_copy = GMSTATES(0)
+        else:
+            state_copy = self
+            fn_return_val = state_copy
+        
+        state_copy._state_ = np.delete(self._state_, idx_vector, 0)
+        state_copy._covariance_ = np.delete(self._covariance_, idx_vector, 0)
+        return fn_return_val
+        
+    
     def __getitem__(self, index):
         return GMSAMPLE(self._state_[index].copy(), self._covariance_[index].copy())
     
@@ -98,7 +129,6 @@ class GMPHD(PHD):
         
         
     def phdUpdate(self, observation_set):
-        num_x = len(self.states)
         num_observations = len(observation_set)
         if num_observations:
             z_dim = len(observation_set[0])
@@ -120,45 +150,38 @@ class GMPHD(PHD):
         self.weights.__imul__(detection_probability)
         
         # Split x and P out from the combined state vector
-        x = [self.states[i][0] for i in range(num_x)]
-        P = [self.states[i][1] for i in range(num_x)]
+        detected_states = self.states[detection_probability > 0.1]
+        x = detected_states.state
+        P = detected_states.covariance
         
         # Part of the Kalman update is common to all observation-updates
-        x, P, kalman_info = kalman_update(x, P, 
-                                          self.parameters.obs_fn.parameters.H, 
-                                          self.parameters.obs_fn.parameters.R, 
-                                          None, 0)
+        x, P, kalman_info = blas_KF_update(x, P, 
+                                          np.array([self.parameters.obs_fn.parameters.H]), 
+                                          np.array([self.parameters.obs_fn.parameters.R]), 
+                                          None, INPLACE=True)#USE_NP=0)
         
+        new_gmstate = GMSTATES(0)
         # We need to update the states and find the updated weights
         for (_observation_, obs_count) in zip(observation_set, range(num_observations)):
             #new_x = copy.deepcopy(x)
             # Apply the Kalman update to get the new state - update in-place
             # and return the residuals
-            new_x, residuals = kalman_update_x(x, kalman_info.pred_z, 
-                                        [_observation_], kalman_info.kalman_gain)
+            new_x, residuals = blas_KF_update_x(x, kalman_info.pred_z, 
+                                        [_observation_], kalman_info.kalman_gain, INPLACE=False)
             
             # Calculate the weight of the Gaussians for this observation
             # Calculate term in the exponent
-            if type(kalman_info.inv_sqrt_S[0]) == type(list()):
-                # If inv_sqrt_S is a list:
-                x_pdf = [np.exp(-0.5*(np.dot(kalman_info.inv_sqrt_S[i], 
-                                         residuals[i])**2).sum())/ \
-                    np.sqrt(kalman_info.det_S[i]*(2*np.pi)**z_dim) 
-                    for i in range(num_x)]
-            else:
-                # otherwise, if inv_sqrt_S is a matrix:
-                x_pdf = [np.exp(-0.5*(np.dot(kalman_info.inv_sqrt_S[i], 
-                                         residuals[i]).A[0]**2).sum())/ \
-                    np.sqrt(kalman_info.det_S[i]*(2*np.pi)**z_dim) 
-                    for i in range(num_x)]
-            
+            x_pdf = np.exp(-0.5*np.power(
+                blas_tools.dgemv(kalman_info, residuals), 2).sum(axis=1))/ \
+                np.sqrt(kalman_info.det_S*(2*np.pi)**z_dim) 
             
             new_weight = self.weights*x_pdf
             # Normalise the weights
             new_weight.__idiv__(clutter_pdf[obs_count] + new_weight.sum())
             
             # Create new state with new_x and P to add to _states_
-            self._states_ +=[[new_x[i], copy.copy(P[i])] for i in range(num_x)]
+            new_gmstate.set(new_x, P)
+            self._states_.append(new_gmstate)
             self._weights_ += [new_weight]
             
         self._weights_ = np.concatenate(self._weights_)
@@ -168,16 +191,16 @@ class GMPHD(PHD):
         if (self.parameters.phd_parameters['elim_threshold'] <= 0):
             return
         retain_indices = np.where((self._weights_ >= self.parameters.phd_parameters['elim_threshold']))[0]
-        pruned_states = [self._states_[ri] for ri in retain_indices]
+        pruned_states = self._states_.select(retain_indices, INPLACE=False)
         pruned_weights = self._weights_[retain_indices]
         
         if (len(pruned_states) > self.parameters.phd_parameters['max_terms']):
             inds = np.flipud(pruned_weights.argsort())
             inds = inds[self.parameters.phd_parameters['max_terms']:]
-            phdmisctools.delete_from_list(pruned_states, inds.tolist())
+            pruned_states.delete(inds, INPLACE=True)
             pruned_weights = np.delete(pruned_weights, inds)
         
-        self._states_ = pruned_states
+        self._states_.set( *pruned_states.members() )
         self._weights_ = pruned_weights
         
     
@@ -187,32 +210,33 @@ class GMPHD(PHD):
         
         result_wt_list = []
         result_state_list = []
+        result_covariance_list = []
         
         num_remaining_components = len(self._weights_)
         while num_remaining_components:
             max_wt_index = self._weights_.argmax()
-            x_list = [tmp_states_[0] for tmp_states_ in self._states_]
-            P_list = [tmp_states_[1] for tmp_states_ in self._states_]
             
-            mahalanobis_dist = phdmisctools.mahalanobis([self._states_[max_wt_index][0]], 
-                                                        [self._states_[max_wt_index][1].tolist()], 
-                                                         x_list)
-            merge_list_indices = np.where(mahalanobis_dist <= self.parameters.phd_parameters['merge_threshold'])[0].tolist()
-            
-            x_merge_list = [x_list[i] for i in merge_list_indices]
-            P_merge_list = [P_list[i] for i in merge_list_indices]
-            merged_wt, merged_x, merged_P = \
-                phdmisctools.merge_states(self._weights_[merge_list_indices], 
-                                          x_merge_list,
-                                          P_merge_list)
+            max_wt_state = self._states_[max_wt_index]
+            mahalanobis_dist = blas_tools.mahalanobis(max_wt_state.state, 
+                                                      max_wt_state.covariance, 
+                                                      self._states_.state())
+            merge_list_indices = np.where(mahalanobis_dist <= self.parameters.phd_parameters['merge_threshold'])[0]
+            merge_list_states = self._states_[merge_list_indices] #.select(merge_list_indices, INPLACE=False)
+            merged_wt, merged_x, merged_P = blas_tools.merge_states(
+                                            self._weights_[merge_list_indices], 
+                                            merge_list_states.state,
+                                            merge_list_states.covariance)
+                
             result_wt_list += [merged_wt]
-            result_state_list += [[merged_x, merged_P]]
+            result_state_list += [merged_x]
+            result_covariance_list += [merged_P]
             
-            phdmisctools.delete_from_list(self._states_, merge_list_indices)
+            #phdmisctools.delete_from_list(
+            self._states_.delete(merge_list_indices)
             self._weights_ = np.delete(self._weights_, merge_list_indices)
             num_remaining_components = len(self._weights_)
         
-        self._states_ = result_state_list
+        self._states_.set(np.array(result_state_list), np.array(result_covariance_list))
         self._weights_ = np.array(result_wt_list)
         
     
@@ -264,6 +288,80 @@ def blas_KF_predict(state, covariance, F, Q, B=None, u=None):
     Q = np.repeat(np.array([Q]), state.shape[0], 0)
     blas_tools.dgemm(F, blas_tools.dgemm(covariance, F, TRANSPOSE_B=True), C=Q)
     return pred_state, Q
+    
+
+def blas_KF_update(state, covariance, H, R, z=None, INPLACE=True):
+    kalman_info = lambda:0
+    assert z==None or len(z.shape)==1, "z must be a single observations, not an array of observations"
+    
+    if INPLACE:
+        upd_state = state
+        upd_covariance = covariance
+        covariance_copy = covariance.copy()
+    else:
+        upd_state = state.copy()
+        upd_covariance = covariance.copy()
+        covariance_copy = covariance
+    
+    # Store R
+    chol_S = np.repeat(R, state.shape[0], 0)
+    # Compute PH^T
+    p_ht = blas_tools.dgemm(covariance, H, TRANSPOSE_B=True)
+    # Compute HPH^T + R
+    blas_tools.dgemm(H, p_ht, C=chol_S)
+    # Compute the Cholesky decomposition
+    blas_tools.dpotrf(chol_S, True)
+    # Compute the determinant
+    diag_vec = np.array([np.diag(chol_S[i]) for i in range(chol_S.shape[0])])
+    det_S = diag_vec.prod(1)**2
+    # Compute the inverse of the square root
+    inv_sqrt_S = blas_tools.dtrtri(chol_S, 'l')
+    # Compute the inverse using dsyrk
+    inv_S = blas_tools.dsyrk('l', inv_sqrt_S, TRANSPOSE_A=True)
+    # Symmetrise the matrix since only the lower triangle is stored
+    blas_tools.symmetrise(inv_S, 'l')
+    #blas_tools.dpotri(op_S, True)
+    # inv_S = op_S
+    
+    # Kalman gain
+    kalman_gain = blas_tools.dgemm(p_ht, inv_S)
+    
+    # Observation from current state
+    pred_z = blas_tools.dgemv(H, state)
+    if not (z==None):
+        residuals = np.repeat(z, pred_z.shape[0], 0)
+        blas_tools.daxpy(-1, pred_z, residuals)
+        # Update the state
+        upd_state = blas_tools.dgemv(kalman_gain, residuals, y=upd_state)
+    else:
+        residuals = np.empty(0)
+    
+    # Update the covariance
+    k_h = blas_tools.dgemm(kalman_gain, H)
+    blas_tools.dgemm(k_h, covariance_copy, alpha=-1.0, C=upd_covariance)
+    
+    kalman_info.inv_sqrt_S = inv_sqrt_S
+    kalman_info.det_S = det_S
+    kalman_info.pred_z = pred_z
+    kalman_info.kalman_gain = kalman_gain
+    kalman_info.residuals = residuals
+    
+    return upd_state, upd_covariance, kalman_info
+    
+    
+def blas_KF_update_x(x, pred_z, z, kalman_gain, INPLACE=True):
+    assert z==None or len(z.shape)==1, "z must be a single observations, not an array of observations"
+    if INPLACE:
+        upd_state = x.copy()
+    else:
+        upd_state = x
+    
+    residuals = np.repeat(z, pred_z.shape[0], 0)
+    blas_tools.daxpy(-1, pred_z, residuals)
+    # Update the state
+    upd_state = blas_tools.dgemv(kalman_gain, residuals, y=upd_state)
+    
+    return upd_state, residuals
     
     
 def kalman_predict(x, P, F, Q):
@@ -345,6 +443,14 @@ def kalman_update_x(x, zhat, z, kalman_gain):
     
 
 def markov_predict(state, parameters):
+    x_pred, P_pred = kalman_predict(state.state(), state.covariance(), 
+                                    np.array([parameters.F]),
+                                    np.array([parameters.Q]))
+    state.set(x_pred, P_pred)
+    return state
+    
+    
+def __markov_predict(state, parameters):
     num_x = len(state)
     x = [jointstate[0] for jointstate in state]
     P = [jointstate[1] for jointstate in state]
@@ -360,11 +466,10 @@ def uniform_clutter(z, parameters):
 def measurement_birth(z, parameters):
     # Convert the observation to state space
     x = parameters.obs2state(z)
-    
     # Couple each with (observation) noise
-    P = [copy.copy(parameters.R) for count in range(len(z))]
-    
-    birth_states = [[x[i], P[i]] for i in range(len(z))]
+    P = np.array([parameters.R]).repeat(len(z), 0)
+    birth_states = GMSTATES(0)
+    birth_states.set(x, P)
     birth_weights = parameters.intensity*range(len(z))
     return birth_states, birth_weights
     

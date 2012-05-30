@@ -64,15 +64,27 @@ class STATES(object):
         state_copy._state_ = self._state_.copy()
         return state_copy
     
-    def select(self, idx_vector, COPY=True):
+    def select(self, idx_vector, INPLACE=False):
         fn_return_val = None
-        if COPY:
+        if not INPLACE:
             state_copy = STATES(0)
             state_copy._state_ = self._state_[idx_vector]
             fn_return_val = state_copy
         else:
             self._state_ = self._state_[idx_vector]
         return fn_return_val
+        
+    
+    def delete(self, idx_vector, INPLACE=True):
+        fn_return_val = None
+        if not INPLACE:
+            state_copy = STATES(0)
+            state_copy._state_ = np.delete(self._state_, idx_vector, 0)
+            fn_return_val = state_copy
+        else:
+            self._state_ = np.delete(self._state_, idx_vector, 0)
+        return fn_return_val
+        
         
     def __getitem__(self, index):
         return self._state_[index].copy()

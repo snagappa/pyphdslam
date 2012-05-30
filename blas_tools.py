@@ -702,7 +702,7 @@ def dpotrs(cholA, b, x=None):
     if DEBUG:
         assert_valid_matrix(cholA, "cholA")
         assert_valid_vector(b, "b")
-        assert cholA.shape[0] in [1, b.shape[0]] and b.shape[0] in [1, cholA.shape[0]], NUM_ELEM_MISMATCH
+        assert cholA.shape[0]==b.shape[0] or cholA.shape[0]==1 or b.shape[0]==1, NUM_ELEM_MISMATCH
         assert cholA.shape[2] == b.shape[1], M_V_DIM_MISMATCH
     
     fn_return_val = None
@@ -750,9 +750,9 @@ def dposv(A, b, INPLACE=False, OVERWRITE_A=False):
     fn_return_val = ()
     if not OVERWRITE_A:
         A = A.copy()
-        fn_return_val += (None,)
-    else:
         fn_return_val += (A,)
+    else:
+        fn_return_val += (None,)
     dpotrf(A, INPLACE=True)
     
     if not INPLACE:
@@ -764,6 +764,19 @@ def dposv(A, b, INPLACE=False, OVERWRITE_A=False):
     return fn_return_val
     
 
+# Compute inverse of a triangular matrix using dtrtri
+def dtrtri(A, UPLO, INPLACE=False):
+    if DEBUG:
+        assert_valid_matrix(A)
+        assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'L', 'u', 'U']"
+    fn_return_val = None
+    if not INPLACE:
+        A = A.copy()
+        fn_return_val = A
+    exec blas_weaver("dtrtri")
+    return fn_return_val
+    
+    
 def inverse(A, FACTORISATION, INPLACE=False):
     assert FACTORISATION[0] in ["c", "C", "l", "L"], "Factorisation must be either 'c' - cholesky or 'l' - LU"
     if not INPLACE:
@@ -790,6 +803,27 @@ def symmetrise(A, UPLO):
                  extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
     
 
+def mahalanobis(x, P, y):
+    residual = x.copy()
+    P_copy = P.copy()
+    daxpy(-1.0, y, residual)
+    _, p_residual = dposv(P_copy, residual, OVERWRITE_A=True)
+    return np.power(ddot(residual, p_residual), 0.5)
+    
+    
+def merge_states(wt, x, P):
+    merged_wt = wt.sum()
+    merged_x = np.sum(daxpy(wt, x), 0)/merged_wt
+    residual = x.copy()
+    daxpy(-1.0, np.array([merged_x]), residual)
+    # Convert the residual to a column vector
+    residual.shape += (1,)
+    P_copy = P.copy()
+    merged_P = sum(dsyrk('l', residual, True, 1.0, wt, P_copy), 0)/merged_wt
+    return merged_wt, merged_x, merged_P
+    
+    
+    
 def dgemv_old(A, x, alpha=1.0, beta=0.0, y=None, TRANSPOSE_A=False):
     A_is = whatisit(A)
     x_is = whatisit(x)

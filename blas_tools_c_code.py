@@ -32,11 +32,26 @@ omp_code = """
         shared(num_x, vec_len, alpha, alpha_offset, x, inc, y, nthreads) private(i, tid)
     """
     
+lapack_headers = """
+#include <atlas/clapack.h>
+
+extern "C" {
+    int dpotri_(char *UPLO, int *N, double *A, int *LDA, int *INFO);
+    int dtrtri_(char *UPLO, char *DIAG, int *N, double *A, int *LDA, int *INFO);
+}
+
+"""
+
 gsl_blas_headers = """
 #include <gsl/gsl_blas.h>
+#include <gsl/gsl_cblas.h>
 #include <gsl/gsl_vector.h>
 #include <gsl/gsl_matrix.h>
 
+extern "C" {
+     int clapack_dtrtri ( const enum CBLAS_ORDER Order, const enum CBLAS_UPLO Uplo, const enum CBLAS_DIAG Diag, const int N, double *A, const int lda );
+
+}
 """
 
 gsl_la_headers = """
@@ -1195,16 +1210,16 @@ class dpotrs:
     gsl_matrix_view gsl_cholA;
     gsl_vector_view gsl_x, gsl_b;
     
-    num_A = NA[0];
-    A_rows = NA[1];
+    num_A = NcholA[0];
+    A_rows = NcholA[1];
     A_offset = num_A==1?0:A_rows*A_rows;
     
     num_b = Nb[0];
-    b_offset = num_b==1?0:LU_rows;
+    b_offset = num_b==1?0:A_rows;
     num_x = Nx[0];
-    x_offset = LU_rows;
+    x_offset = A_rows;
     
-    #pragma omp parallel for shared(num_x, cholA, A_offset, A_rows b, b_offset, x, x_offset) private(i, gsl_cholA, gsl_b, gsl_x)
+    #pragma omp parallel for shared(num_x, cholA, A_offset, A_rows, b, b_offset, x, x_offset) private(i, gsl_cholA, gsl_b, gsl_x)
     for (i=0; i<num_x; i++) {
         gsl_cholA = gsl_matrix_view_array(cholA+(i*A_offset), A_rows, A_rows);
         gsl_b = gsl_vector_view_array(b+(i*b_offset), A_rows);
@@ -1249,24 +1264,49 @@ class dpotri:
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
-    python_vars = ["cholA"]
+    python_vars = ["A"]
     code = """
     int i, j, num_A;
     int A_rows, A_cols, A_offset;
-    gsl_matrix_view gsl_cholA;
+    gsl_matrix_view gsl_A;
     
     num_A = NA[0];
     A_rows = NA[1];
     A_offset = A_rows*A_rows;
     
-    #pragma omp parallel for shared(numA, cholA, A_offset, A_rows) private(i, gsl_cholA)
+    #pragma omp parallel for shared(num_A, A, A_offset, A_rows) private(i, gsl_A)
     for (i=0; i<num_A; i++) {
-        gsl_cholA = gsl_matrix_view_array(cholA+(i*A_offset), A_rows, A_rows);
-        gsl_linalg_cholesky_invert (&gsl_cholA.matrix);
+        gsl_A = gsl_matrix_view_array(A+(i*A_offset), A_rows, A_rows);
+        gsl_linalg_cholesky_invert (&gsl_A.matrix);
     }
     """
     
     
+###############################################################################
+class dtrtri:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    support_code = omp_headers+gsl_blas_headers
+    libraries = lptf77blas+lgomp+llapack+lgsl + ["cblas"]
+    python_vars = ["A"]
+    code = """
+    int i, j, num_A;
+    int A_rows, A_cols, A_offset;
+    char uplo, diag;
+    int info;
+    uplo = 'l';
+    diag = 'n';
+    
+    num_A = NA[0];
+    A_rows = NA[1];
+    A_offset = A_rows*A_rows;
+    
+    #pragma omp parallel for shared(num_A, uplo, diag, A_rows, A, A_offset) private(i, info)
+    for (i=0; i<num_A; i++) {
+        //dtrtri_(&uplo, &diag, &A_rows, A+(i*A_offset), &A_rows, &info);
+        clapack_dtrtri(CblasRowMajor, CblasLower, CblasNonUnit, A_rows, A+(i*A_offset), A_rows);
+    }
+    """
 ###############################################################################
 class symmetrise:
     def __call__(self):
