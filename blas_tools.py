@@ -220,6 +220,19 @@ def fast_copy(x):
     
 
 def ddot(x, y):
+    """Returns the dot product of two vectors.
+    
+    Given two vectors x and y, return transpose(x)*y
+    
+    Parameters
+    *x, y*: two dimensional ndarray, shape (Mx, N) and (My, N), Mx==My or \
+            Mx==1 or My==1, where each row corresponds to a single \
+            vector. Elements of x and y must have the same dimensions N. 
+    
+    Returns
+    *z:* ndarray corresponding to the dot product of the elements of x and y.
+    
+    """
     if DEBUG:
         assert_valid_vector(x, "x")
         assert_valid_vector(y, "y")
@@ -231,6 +244,9 @@ def ddot(x, y):
     
     
 def dnrm2(x):
+    """
+    Returns the L2 norm of a vector x.
+    """
     if DEBUG:
         assert_valid_vector(x, "x")
     
@@ -240,6 +256,9 @@ def dnrm2(x):
 
 
 def dasum(x):
+    """
+    Returns the sum of elements in a vector x.
+    """
     if DEBUG:
         assert_valid_vector(x)
     
@@ -249,6 +268,9 @@ def dasum(x):
     
     
 def idamax(x):
+    """
+    Returns the index corresponding to the maximum value in a vector x.
+    """
     if DEBUG:
         assert_valid_vector(x, "x")
     
@@ -258,6 +280,10 @@ def idamax(x):
     
     
 def daxpy(alpha, x, y=None):
+    """
+    Evaluates y = a*x + y
+    If y is not specified, the function returns the value a*x as a new vector.
+    """
     if DEBUG:
         assert_valid_vector(x, "x")
     
@@ -280,6 +306,9 @@ def daxpy(alpha, x, y=None):
     
     
 def dscal(alpha, x):
+    """
+    Multiply the vector x by alpha in-place.
+    """
     if DEBUG:
         assert_valid_vector(x)
     
@@ -293,6 +322,9 @@ def dscal(alpha, x):
     
     
 def dcopy(x, y):
+    """
+    Performs the operation y=x in-place.
+    """
     if DEBUG:
         assert_valid_vector(x, "x")
         assert_valid_vector(y, "y")
@@ -315,9 +347,11 @@ def _dcopy_(x, y, vec_len=None, x_offset=0, y_offset=0):
 #def dgemv(A, x, alpha=1.0, y=None, beta=1.0, TRANSPOSE_A=False):
 def dgemv(A, x, TRANSPOSE_A=False, alpha=1.0, beta=1.0, y=None):
     """
+    Performs in-place matrix vector multiplication
     dgemv --
     y = alpha*A*x + beta*y OR 
-    y = alpha*A**T*x + beta*y
+    y = alpha*A**T*x + beta*y if TRANSPOSE_A==True.
+    If y is not specified, a new vector is returned.
     """
     if DEBUG:
         assert_valid_matrix(A, "A")
@@ -350,6 +384,7 @@ def dgemv(A, x, TRANSPOSE_A=False, alpha=1.0, beta=1.0, y=None):
     
 def dtrmv(UPLO, A, x, TRANSPOSE_A=False):
     """
+    Performs in-place matrix vector multiplication for triangular matrix A.
     dtrmv -- 
     x := A*x  if TRANSPOSE_A=False or   
     x := A**T*x  if TRANSPOSE_A=True
@@ -366,7 +401,11 @@ def dtrmv(UPLO, A, x, TRANSPOSE_A=False):
 
 def dtrsv(UPLO, A, x, TRANSPOSE_A=False):
     """
-    dtrsv -- Solve A*x = b,   or   A**T*x = b, A is nxn triangular
+    Solve the set of linear equations Ax=b in-place.
+    On entry, x contains b. This is overwritten with the values for x.
+    dtrsv -- Solve A*x = b if TRANSPOSE_A=False   or
+    A**T*x = b if TRANSPOSE_A=True.
+    A is nxn triangular
     x = A^{-1}*b or x = A^{-T}b
     """
     if DEBUG:
@@ -383,7 +422,9 @@ def dtrsv(UPLO, A, x, TRANSPOSE_A=False):
 
 def dsymv(UPLO, A, x, alpha=1.0, beta=1.0, y=None):
     """
+    Performs in-place matrix vector multiplication for the symmetric matrix A.
     dsymv -- y = alpha*A*x + beta*y, A is symmetric
+    if y is not specified, a new vector is returned.
     """
     if DEBUG:
         assert_valid_matrix(A, "A")
@@ -412,7 +453,9 @@ def dsymv(UPLO, A, x, alpha=1.0, beta=1.0, y=None):
     
 def dger(x, y, alpha=1.0, A=None):
     """
+    Perform the general rank 1 operation in-place.
     dger -- rank 1 operation, A = alpha*x*y**T + A
+    if A is not specified, it is assumed to be 0 and a new matrix is returned.
     """
     if DEBUG:
         assert_valid_vector(x, "x")
@@ -440,8 +483,10 @@ def dger(x, y, alpha=1.0, A=None):
     
 def dsyr(UPLO, x, alpha=1.0, A=None):
     """
+    Perform the symmetric rank 1 operation in-place.
     dsyr -- symmetric rank 1 operation
     A = alpha*x*x**T + A,  A is nxn symmetric
+    If A is not specified, a new matrix is returned.
     """
     if DEBUG:
         assert_valid_vector(x, "x")
@@ -469,9 +514,11 @@ def dsyr(UPLO, x, alpha=1.0, A=None):
 #def dgemm(A, B, alpha=1.0, C=None, beta=1.0, TRANSPOSE_A=False, TRANSPOSE_B=False):
 def dgemm(A, B, TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, beta=1.0, C=None):
     """
+    Performs general matrix matrix multiplication in-place
     dgemm -- matrix-matrix operation, 
     C := alpha*op( A )*op( B ) + beta*C,
     where  op( X ) is one of op( X ) = X   or   op( X ) = X**T
+    If C is not specified, a new matrix is returned.
     """
     if DEBUG:
         assert_valid_matrix(A, "A")
@@ -511,10 +558,12 @@ def dgemm(A, B, TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, beta=1.0, C=Non
 
 def dsymm(A, B, UPLO, SIDE='l', alpha=1.0, beta=1.0, C=None):
     """
+    Performs in-place matrix matrix multiplication for symmetric matrix A.
     dsymm -- matrix-matrix operation, A is symmetric, B and C are mxn
     C := alpha*A*B + beta*C, if SIDE='l' or
     C := alpha*B*A + beta*C, if SIDE='r'
     UPLO = 'l' or 'u'
+    if C is not specified, a new matrix is returned.
     """
     if np.isscalar(alpha):
         alpha = np.array([alpha], dtype=float)
@@ -553,9 +602,11 @@ def dsymm(A, B, UPLO, SIDE='l', alpha=1.0, beta=1.0, C=None):
 
 def dsyrk(UPLO, A, TRANSPOSE_A=False, alpha=1.0, beta=1.0, C=None):
     """
+    Perform in-place symmetric rank k operation.
     dsyrk -- symmetric rank k operation, C is symmetric
     C := alpha*A*A**T + beta*C  if TRANSPOSE_A=False or
     C := alpha*A**T*A + beta*C  if TRANSPOSE_A=True
+    If C is not specified, a new matrix is returned.
     """
     A_dims = list(A.shape[1:])
     if TRANSPOSE_A:
@@ -590,6 +641,21 @@ def dsyrk(UPLO, A, TRANSPOSE_A=False, alpha=1.0, beta=1.0, C=None):
 
 # LU decomposition
 def dgetrf(A, INPLACE=False):
+    """
+    Performs LU decomposition on the matrix A.
+    Returns (LU, ipiv, signum) if INPLACE=False, otherwise (ipiv, signum)
+    ipiv contains the pivot points for use by dgetrs(), dgetri() and signum is
+    used to compute the determinant by dgetrdet().
+    
+    The matrix A is decomposed as A = L*U and both L and U are stored in the 
+    same matrix. L is obtained from the strictly lower part of the matrix and 
+    placing 1s on the diagonal. U is obtained by taking the upper part of the
+    matrix (including the diagonal). If INPLACE=False, a new matrix is 
+    returned with the decomposition.
+    
+    The GSL is used to perform the decomposition. See the documentation for 
+    further details.
+    """
     if DEBUG:
         assert_valid_matrix(A, "A")
     ipiv = np.zeros(A.shape[0:2], dtype=int)
@@ -606,6 +672,11 @@ def dgetrf(A, INPLACE=False):
 
 # Solve Ax=B using LU decomposition
 def dgetrs(LU, ipiv, b, x=None):
+    """
+    Solves the set of linear equations Ax=b using the LU decomposition 
+    generated by dgetrf()
+    if x is not specified, a new vector is returned.
+    """
     if DEBUG:
         assert_valid_matrix(LU, "LU")
         assert_valid_vector(ipiv, "ipiv")
@@ -629,6 +700,11 @@ def dgetrs(LU, ipiv, b, x=None):
 
 # Solve Ax=B using LU decomposition in place
 def dgetrsx(LU, ipiv, b):
+    """
+    Solves the set of linear equations Ax=b in-place using the LU decomposition
+    generated by dgetrf().
+    On exit, the values in b are overwritten.
+    """
     if DEBUG:
         assert_valid_matrix(LU, "LU")
         assert_valid_vector(ipiv, "ipiv")
@@ -642,6 +718,10 @@ def dgetrsx(LU, ipiv, b):
     
 
 def dgetri(LU, ipiv):
+    """
+    Computes the inverse of a matrix A in-place using the LU decomposition
+    generated from dgetrf().
+    """
     if DEBUG:
         assert_valid_matrix(LU, "LU")
         assert_valid_vector(ipiv, "ipiv")
@@ -654,29 +734,33 @@ def dgetri(LU, ipiv):
 
 # Solve Ax = B
 def dgesv(A, b, INPLACE=False, OVERWRITE_A=False):
+    """
+    Solves the set of linear equations Ax=b.
+    Returns (x, A, ipiv, signum)
+    If INPLACE=True, then b will be overwritten with the result.
+    If OVERWRITE_A=True, then A will be overwritten with the LU decomposition.
+    """
     if DEBUG:
         assert_valid_matrix(A, "A")
         assert_valid_vector(b, "b")
         if INPLACE:
             assert A.shape[0] in [1, b.shape[0]]
-    fn_return_val = ()
     if not OVERWRITE_A:
         A = A.copy()
-        fn_return_val += (A,)
-    else:
-        fn_return_val += (None,)
     ipiv, signum = dgetrf(A, INPLACE=True)
-    fn_return_val += (ipiv, signum)
     if not INPLACE:
         x = dgetrs(A, ipiv, b)
-        fn_return_val += (x,)
     else:
         dgetrsx(A, ipiv, b)
-        fn_return_val += (None,)
+        x = b
+    fn_return_val = (x, A, ipiv, signum)
     return fn_return_val
     
 
 def dgetrdet(LU, signum):
+    """
+    Returns the determinant for matrix A given the LU decomposition and signum.
+    """
     if DEBUG:
         assert_valid_matrix(LU)
         assert signum.shape[0] == LU.shape[0], NUM_ELEM_MISMATCH
@@ -687,6 +771,13 @@ def dgetrdet(LU, signum):
     
 # Cholesky decomposition
 def dpotrf(A, INPLACE=False):
+    """
+    Computes the Cholesky factorisation of a matrix A. The upper triangle of
+    the factorisation contains the transpose of the lower triangle. If only the
+    lower triangle is required, this must be performed on the result.
+    if INPLACE=False, then a new matrix with the symmetrised Cholesky 
+    decomposition is returned, otherwise A is overwritten.
+    """
     if DEBUG:
         assert_valid_matrix(A, "A")
     fn_return_val = None
@@ -699,6 +790,11 @@ def dpotrf(A, INPLACE=False):
 
 # Solve using Cholesky decomposition
 def dpotrs(cholA, b, x=None):
+    """
+    Solve the set of linear equations Ax=b using the cholesky decomposition
+    generated by dpotrf().
+    If x is not specified, a new vector will be returned.
+    """
     if DEBUG:
         assert_valid_matrix(cholA, "cholA")
         assert_valid_vector(b, "b")
@@ -719,6 +815,11 @@ def dpotrs(cholA, b, x=None):
 
 # Solve Ax=B using LU decomposition in place
 def dpotrsx(cholA, b):
+    """
+    Solve the set of linear equations Ax=b in-place using the Cholesky 
+    decomposition generated by dportf().
+    On exit, the vector b is overwritten with the result.
+    """
     if DEBUG:
         assert_valid_matrix(cholA, "cholA")
         assert_valid_vector(b, "b")
@@ -730,6 +831,12 @@ def dpotrsx(cholA, b):
 
 # Compute inverse using Cholesky factorisation from dpotrf
 def dpotri(A, INPLACE=False):
+    """
+    Compute the inverse of the matrix A given its Cholesky decomposition 
+    computed by dpotrf()
+    If INPLACE=False, a new matrix with the inverse is returned, otherwise
+    A is overwritten with its inverse.
+    """
     if DEBUG:
         assert_valid_matrix(A)
     fn_return_val = None
@@ -742,6 +849,11 @@ def dpotri(A, INPLACE=False):
 
 # Solve for positive definite matrix
 def dposv(A, b, INPLACE=False, OVERWRITE_A=False):
+    """
+    Solve the set of linear equations for the symmetric matrix A and vector b
+    
+    
+    """
     if DEBUG:
         assert_valid_matrix(A, "A")
         assert_valid_vector(b, "b")
@@ -750,22 +862,24 @@ def dposv(A, b, INPLACE=False, OVERWRITE_A=False):
     fn_return_val = ()
     if not OVERWRITE_A:
         A = A.copy()
-        fn_return_val += (A,)
-    else:
-        fn_return_val += (None,)
     dpotrf(A, INPLACE=True)
     
     if not INPLACE:
-        x = dpotrs(A, b)
-        fn_return_val += (x,)
+        x = b.copy()
     else:
-        dpotrsx(A, b)
-        fn_return_val += (None,)
+        x = b
+    x = dpotrsx(A, b)
+    fn_return_val += (x, A)
     return fn_return_val
     
 
 # Compute inverse of a triangular matrix using dtrtri
 def dtrtri(A, UPLO, INPLACE=False):
+    """
+    Computes the inverse of a triangular matrix.
+    If INPLACE=False, a new matrix with the inverse is returned, otherwise A
+    is overwritten.
+    """
     if DEBUG:
         assert_valid_matrix(A)
         assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'L', 'u', 'U']"
@@ -778,6 +892,11 @@ def dtrtri(A, UPLO, INPLACE=False):
     
     
 def inverse(A, FACTORISATION, INPLACE=False):
+    """
+    Compute the inverse of a matrix using (C)holesky of (L)U decomposition.
+    If INPLACE=False, a new matrix with the inverse is returned, otherwise A
+    is overwritten.
+    """
     assert FACTORISATION[0] in ["c", "C", "l", "L"], "Factorisation must be either 'c' - cholesky or 'l' - LU"
     if not INPLACE:
         A = A.copy()
@@ -791,6 +910,11 @@ def inverse(A, FACTORISATION, INPLACE=False):
     
             
 def symmetrise(A, UPLO):
+    """
+    Given an upper or lower triangular matrix, make the matrix symmetric by 
+    copying the values to the lower or upper triangle. This operation is 
+    performed in-place.
+    """
     if DEBUG:
         assert_valid_matrix(A, "A")
         assert A.shape[1]==A.shape[2], "A must be symmetric"
@@ -803,26 +927,6 @@ def symmetrise(A, UPLO):
                  extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
     
 
-def mahalanobis(x, P, y):
-    residual = x.copy()
-    P_copy = P.copy()
-    daxpy(-1.0, y, residual)
-    _, p_residual = dposv(P_copy, residual, OVERWRITE_A=True)
-    return np.power(ddot(residual, p_residual), 0.5)
-    
-    
-def merge_states(wt, x, P):
-    merged_wt = wt.sum()
-    merged_x = np.sum(daxpy(wt, x), 0)/merged_wt
-    residual = x.copy()
-    daxpy(-1.0, np.array([merged_x]), residual)
-    # Convert the residual to a column vector
-    residual.shape += (1,)
-    P_copy = P.copy()
-    merged_P = sum(dsyrk('l', residual, True, 1.0, wt, P_copy), 0)/merged_wt
-    return merged_wt, merged_x, merged_P
-    
-    
     
 def dgemv_old(A, x, alpha=1.0, beta=0.0, y=None, TRANSPOSE_A=False):
     A_is = whatisit(A)

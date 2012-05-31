@@ -24,13 +24,13 @@
 
 
 import gmphdfilter
+from phdfilter import PARAMETERS
 import numpy as np
 import copy
-import phdmisctools
 
 
-def placeholder():
-    return (lambda:0)
+#def placeholder():
+#    return (lambda:0)
 
 
 class GMPHD_SLAM_FEATURE(gmphdfilter.GMPHD):
@@ -54,7 +54,7 @@ class PHDSLAM(object):
                  clutter_fn, birth_fn, ps_fn, pd_fn,
                  feature_estimate_fn, feature_parameters):
         
-        self.parameters = placeholder()
+        self.parameters = PARAMETERS()
         self.set_slam_parameters(state_markov_predict_fn, state_obs_fn,
                                state_likelihood_fn, state__state_update_fn,
                                state_estimate_fn, state_parameters,
@@ -63,13 +63,20 @@ class PHDSLAM(object):
                                clutter_fn, birth_fn, ps_fn, pd_fn,
                                feature_estimate_fn, feature_parameters)
         
-        
-        self.states = np.zeros(self.state_parameters.num_particles, 
-                              self.state_parameters.state_dims).tolist()
+        # Vehicle states
+        self.states = np.zeros(self.parameters.state_parameters.num_particles, 
+                              self.parameters.state_parameters.state_dims)
+        # Map of landmarks approximated by the PHD conditioned on vehicle state
         self.maps = [self.create_default_feature() 
-                    for i in range(state_parameters.num_particles)]
-        self.weights = 1/self.state_parameters.num_particles* \
-                        np.ones(self.state_parameters.num_particles)
+                    for i in range(self.parameters.state_parameters.num_particles)]
+        # Particle weights
+        self.weights = 1/self.parameters.state_parameters.num_particles* \
+                        np.ones(self.parameters.state_parameters.num_particles)
+        # Time from last update
+        self.last_predict_time = 0
+        self.last_update_time = 0
+        # Last update was from either odometry or map landmarks
+        self.last_update_type = None
         
         
     def set_slam_parameters(self, state_markov_predict_fn, state_obs_fn,
@@ -120,8 +127,8 @@ class PHDSLAM(object):
         self.parameters.feature_parameters = feature_parameters
         
         
-    def init(self, particles, weights):
-        self.particles = particles
+    def init_particles(self, states, weights):
+        self.states = states
         self.weights = weights
         
     
@@ -138,14 +145,14 @@ class PHDSLAM(object):
         if not force:
             try:
                 getattr(self.parameters, parameter_name)
-            except:
+            except AttributeError:
                 print "Parameter ", parameter_name, " does not exist. Add it first"
                 return
         setattr(self.parameters, parameter_name, new_value)
         
     
     def create_default_feature(self):
-        return GMPHD_SLAM_FEATURE(self.parameters.feature_markov_transition,
+        return GMPHD_SLAM_FEATURE(self.parameters.feature_markov_predict_fn,
                                   self.parameters.feature_obs_fn,
                                   self.parameters.feature_likelihood_fn,
                                   self.parameters.feature__state_update_fn,
@@ -157,21 +164,25 @@ class PHDSLAM(object):
                                   self.parameters.feature_parameters)
     
     
-    def predict(self):
-        self._predict_state_()
-        self._predict_map_()
+    def predict(self, predict_to_time):
+        delta_t = predict_to_time - self.last_predict_time
+        self._predict_state_(delta_t)
+        self._predict_map_(delta_t)
+        self.last_predict_time = predict_to_time
     
     
-    def _predict_state_(self):
+    def _predict_state_(self, delta_t):
+        self.parameters.state_markov_predict_fn.parameters.delta_t = delta_t
         self.states = self.parameters.state_markov_predict_fn.handle(
           self.states, self.parameters.state_markov_predict_fn.parameters)
         for i in range(self.parameters.state_parameters.num_particles):
-            setattr(self.maps[i].parameters.obs_fn.parameters, "parent_state", self.states[i], force=1)
-            setattr(self.maps[i].parameters.pd_fn.parameters, "parent_state", self.states[i], force=1)
-            setattr(self.maps[i].parameters.birth_fn.parameters, "parent_state", self.states[i], force=1)
+            setattr(self.maps[i].parameters.obs_fn.parameters, "parent_state", self.states[i])
+            setattr(self.maps[i].parameters.pd_fn.parameters, "parent_state", self.states[i])
+            setattr(self.maps[i].parameters.birth_fn.parameters, "parent_state", self.states[i])
         
     
-    def _predict_map_(self):
+    def _predict_map_(self, delta_t):
+        self.parameters.state_parameters.delta_t = delta_t
         [self.maps[i].phdPredict() for i in range(self.parameters.state_parameters.num_particles)]
     
     
@@ -179,11 +190,15 @@ class PHDSLAM(object):
         pass
     
     
-    def update_with_odometry(self):
-        pass
+    def update_with_odometry(self, odometry, update_to_time):
+        if update_to_time > self.last_predict_time:
+            self.predict(update_to_time)
+        # Perform update here
+        self._update_state_with_odometry_(odometry)
+        self.last_update_time = update_to_time
+        
     
-    
-    def _update_state_with_odometry_(self, z):
+    def _update_state_with_odometry_(self, odometry):
         pass
     
     

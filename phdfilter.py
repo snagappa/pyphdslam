@@ -40,24 +40,41 @@ are required."""
 
 import numpy as np
 import copy
-from phdmisctools import get_resample_index
+from misctools import get_resample_index
+
+class PARAMETERS(object): pass
 
 def fn_params(handle=None, parameters=None):
-    fn = (lambda:0)
-    fn.handle = handle
-    fn.parameters = parameters
-    return fn
-    
+    f_p = PARAMETERS()
+    f_p.handle = handle
+    f_p.parameters = parameters
+    return f_p
+
 
 class STATES(object):
+    """
+    Creates an object to store the states of particles.
+    """
     def __init__(self, num_states, ndims=0):
-        self._state_ = np.zeros(num_states, ndims)
+        self._state_ = np.zeros((num_states, ndims))
+        
+    def set(self, state, CREATE_NEW_COPY=False):
+        if CREATE_NEW_COPY:
+            self._state_ = state.copy()
+        else:
+            self._state_ = state
+    
+    def members(self):
+        return (self._state_,)
+        
+    def state(self):
+        return self._state_
         
     def append(self, new_state):
-        if self._state_.shape[0] == 0 or self._shape_.shape[1] == 0:
-            self._state_ = new_state._state_.copy()
+        if self._state_.shape[0] == 0 or self._state_.shape[1] == 0:
+            self._state_ = new_state.state().copy()
         else:
-            self._state_ = np.append(self._state_, new_state._state_)
+            self._state_ = np.append(self._state_, new_state.state())
         
     def copy(self):
         state_copy = STATES(0)
@@ -90,7 +107,7 @@ class STATES(object):
         return self._state_[index].copy()
     
     def __setitem__(self, key, item):
-		self._state_[key] = item
+        self._state_[key] = item
     
 
 class PHD(object):
@@ -99,6 +116,8 @@ class PHD(object):
                  estimate_fn, 
                  phd_parameters={"nparticles":100,
                                  "elim_threshold":1e-3}):
+        self.parameters = PARAMETERS()
+        
         # Markov prediction
         self.parameters.markov_predict_fn = markov_predict_fn
         # Observation function - transform from state to obs space
@@ -149,7 +168,7 @@ class PHD(object):
     def set_parameter(self, parameter_name, new_value):
         try:
             getattr(self.parameters, parameter_name)
-        except:
+        except AttributeError:
             print "Parameter ", parameter_name, " does not exist. Add it first"
             return
         setattr(self.parameters, parameter_name, new_value)
@@ -190,7 +209,12 @@ class PHD(object):
                        for _observation_ in observation_set]
         
         # Account for missed detection and duplicate the state num_obs times
-        [self._states_.append(self.states.copy()) for count in range(num_observations+1)]
+        self._states_ = STATES(0)
+        pred_states = self.states()
+        pred_states.shape = (1,)+pred_states.shape
+        self._states_.set(pred_states)
+        [self._states_.append(pred_states) for count in range(num_observations+1)]
+        pred_states.shape = pred_states.shape[1:]
         self._weights_ = [self.weights*(1-detection_probability)]
         
         # Scale the weights by detection probability -- same for all detection terms
@@ -223,6 +247,8 @@ class PHD(object):
     def phdPrune(self):
         if self.parameters.phd_parameters['elim_threshold'] <= 0:
             return
+        # retain_indices holds the valid indices from each updated group --
+        # retain_indices is a nested vector.
         retain_indices = np.flatnonzero(np.array([_weights_.sum() for _weights_ in self._weights_])>=self.parameters.phd_parameters['elim_threshold'])
         pruned_states = STATES(0)
         [pruned_states.append(self._states_[ri]) for ri in retain_indices]
@@ -240,20 +266,20 @@ class PHD(object):
         # Use np.where instead?
         valid_indices = np.flatnonzero(np.array([_weights_.sum() 
                                         for _weights_ in self._weights_])>=0.5)
-        filter_estimates = [self.estimate_fn.handle(self._states_[vi], 
+        filter_estimates = [self.parameters.estimate_fn.handle(self._states_[vi], 
                                                     self._weights_[vi],
                                                     self.parameters.estimate_fn.parameters)
                             for vi in valid_indices]
         return filter_estimates
         
     
-    def phdResample(self, forceCopy=True):
+    def phdResample(self, FORCE_COPY=True):
         sum_weights = [_weights_.sum() for _weights_ in self._weights_]
         nparticles = np.array(sum_weights)*self.parameters.phd_parameters["nparticles"]
         for count in range(len(self._weights_)):
             resample_indices = get_resample_index(self._weights_[count], nparticles[count])
             self._weights_[count] = (1.0/nparticles[count])*np.ones(nparticles[count])
-            if forceCopy:
+            if FORCE_COPY:
                 self._states_[count] = copy.deepcopy([self._states_[count][ridx] for ridx in resample_indices])
             else:
                 self._states_[count] = [self._states_[count][ridx] for ridx in resample_indices]
