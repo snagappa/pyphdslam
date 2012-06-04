@@ -77,14 +77,14 @@ class STATES(object):
             self._state_ = np.append(self._state_, new_state.state())
         
     def copy(self):
-        state_copy = STATES(0)
+        state_copy = self.__class__(0)
         state_copy._state_ = self._state_.copy()
         return state_copy
     
     def select(self, idx_vector, INPLACE=False):
         fn_return_val = None
         if not INPLACE:
-            state_copy = STATES(0)
+            state_copy = self.__class__(0)
             state_copy._state_ = self._state_[idx_vector]
             fn_return_val = state_copy
         else:
@@ -95,7 +95,7 @@ class STATES(object):
     def delete(self, idx_vector, INPLACE=True):
         fn_return_val = None
         if not INPLACE:
-            state_copy = STATES(0)
+            state_copy = self.__class__(0)
             state_copy._state_ = np.delete(self._state_, idx_vector, 0)
             fn_return_val = state_copy
         else:
@@ -111,13 +111,33 @@ class STATES(object):
     
 
 class PHD(object):
-    def __init__(self, markov_predict_fn, obs_fn, likelihood_fn, 
-                 state_update_fn, clutter_fn, birth_fn, ps_fn, pd_fn,
-                 estimate_fn, 
-                 phd_parameters={"nparticles":100,
-                                 "elim_threshold":1e-3}):
-        self.parameters = PARAMETERS()
+    def __init__(self, *args, **kwargs):
+        """
+        Create a new PHD object.
+        PHD() creates an empty object. attributes can be set by calling the 
+        init() function on the object.
         
+        Initial parameters can be passed on object creation as:
+        PHD(markov_predict_fn, obs_fn, likelihood_fn, state_update_fn, 
+            clutter_fn, birth_fn, ps_fn, pd_fn, estimate_fn, phd_parameters)
+        
+                 ={"nparticles":100,
+                                 "elim_threshold":1e-3}
+        """
+        self.parameters = PARAMETERS()
+        self.states = STATES(0)
+        self.weights = np.empty(0)
+        self._states_ = STATES(0)
+        self._weights_ = np.empty(0)
+        
+        if len(args) or len(kwargs):
+            self.init(*args, **kwargs)
+        
+    
+    def init(self, markov_predict_fn, obs_fn, likelihood_fn, state_update_fn, 
+             clutter_fn, birth_fn, ps_fn, pd_fn, estimate_fn, 
+             phd_parameters={"nparticles":100,
+                             "elim_threshold":1e-3}):
         # Markov prediction
         self.parameters.markov_predict_fn = markov_predict_fn
         # Observation function - transform from state to obs space
@@ -143,13 +163,15 @@ class PHD(object):
         # Other PHD parameters
         self.parameters.phd_parameters = phd_parameters
         
-        self.states = STATES(0)
-        self.weights = np.array([])
-        self._states_ = STATES(0)
-        self._weights_ = np.array([])
-        
     
-    def init(self, states, weights):
+    def copy(self):
+        new_object = self.__class__()
+        new_object.parameters = copy.deepcopy(self.parameters)
+        new_object.states = self.states.copy()
+        new_object._states_ = self._states_.copy()
+        
+        
+    def set_states(self, states, weights):
         self.states = states
         self.weights = weights
         self._states_ = states.copy()
@@ -209,7 +231,7 @@ class PHD(object):
                        for _observation_ in observation_set]
         
         # Account for missed detection and duplicate the state num_obs times
-        self._states_ = STATES(0)
+        self._states_ = self._states_.__class__(0)
         pred_states = self.states()
         pred_states.shape = (1,)+pred_states.shape
         self._states_.set(pred_states)
@@ -239,9 +261,10 @@ class PHD(object):
     
     def phdFlattenUpdate(self):
         self.weights = np.array(self._weights_).flatten()
-        self.states = STATES(0)
+        self.states = self.states.__class__(0)
         for counter in range(len(self._states_)):
             self.states.append(self._states_[counter])
+        self._states_ = self._states_.__class__(0)
         
         
     def phdPrune(self):
@@ -250,7 +273,7 @@ class PHD(object):
         # retain_indices holds the valid indices from each updated group --
         # retain_indices is a nested vector.
         retain_indices = np.flatnonzero(np.array([_weights_.sum() for _weights_ in self._weights_])>=self.parameters.phd_parameters['elim_threshold'])
-        pruned_states = STATES(0)
+        pruned_states = self._states_.__class__(0)
         [pruned_states.append(self._states_[ri]) for ri in retain_indices]
         pruned_weights = [self._weights_[ri] for ri in retain_indices]
         self._states_ = pruned_states

@@ -26,7 +26,7 @@
 import gmphdfilter
 from phdfilter import PARAMETERS
 import numpy as np
-import copy
+import misctools
 
 
 #def placeholder():
@@ -44,6 +44,25 @@ class GMPHD_SLAM_FEATURE(gmphdfilter.GMPHD):
                                     markov_predict_fn, obs_fn, likelihood_fn,
                                     state_update_fn, clutter_fn, birth_fn,
                                     ps_fn, pd_fn, estimate_fn, phd_parameters)
+        
+        
+        def phdIterate(self, observations):
+            # Update existing states
+            self.phdUpdate(observations)
+            # Generate estimates
+            #estimates = self.phdEstimate()
+            # Prune low weight Gaussian components
+            self.phdPrune()
+            # Create birth terms from measurements
+            birth_states, birth_weights = self.phdGenerateBirth(observations)
+            # Append birth terms to Gaussian mixture
+            self.phdAppendBirth(birth_states, birth_weights)
+            # Merge components
+            self.phdMerge()
+            # End of iteration call
+            self.phdFlattenUpdate()
+            #return estimates
+
 
 class PHDSLAM(object):
     def __init__(self, state_markov_predict_fn, state_obs_fn,
@@ -64,16 +83,17 @@ class PHDSLAM(object):
                                feature_estimate_fn, feature_parameters)
         
         # Vehicle states
-        self.states = np.zeros(self.parameters.state_parameters.num_particles, 
+        self.states = np.zeros(self.parameters.state_parameters["nparticles"], 
                               self.parameters.state_parameters.state_dims)
         # Map of landmarks approximated by the PHD conditioned on vehicle state
         self.maps = [self.create_default_feature() 
-                    for i in range(self.parameters.state_parameters.num_particles)]
+                    for i in range(self.parameters.state_parameters["nparticles"])]
         # Particle weights
-        self.weights = 1/self.parameters.state_parameters.num_particles* \
-                        np.ones(self.parameters.state_parameters.num_particles)
+        self.weights = 1/self.parameters.state_parameters["nparticles"]* \
+                        np.ones(self.parameters.state_parameters["nparticles"])
         # Time from last update
-        self.last_predict_time = 0
+        self.last_odo_predict_time = 0
+        self.last_map_predict_time = 0
         self.last_update_time = 0
         # Last update was from either odometry or map landmarks
         self.last_update_type = None
@@ -127,10 +147,12 @@ class PHDSLAM(object):
         self.parameters.feature_parameters = feature_parameters
         
         
-    def init_particles(self, states, weights):
+    def set_states(self, states, weights):
         self.states = states
         self.weights = weights
         
+    def set_maps(self, maps):
+        self.maps = maps
     
     def add_parameter(self, parameter_name, new_value=None):
         setattr(self.parameters, parameter_name, new_value)
@@ -165,17 +187,21 @@ class PHDSLAM(object):
     
     
     def predict(self, predict_to_time):
-        delta_t = predict_to_time - self.last_predict_time
-        self._predict_state_(delta_t)
-        self._predict_map_(delta_t)
-        self.last_predict_time = predict_to_time
+        odo_delta_t = predict_to_time - self.last_odo_predict_time
+        self._predict_state_(odo_delta_t)
+        self.last_odo_predict_time = predict_to_time
+        map_delta_t = predict_to_time - self.last_map_predict_time
+        self._predict_map_(map_delta_t)
+        self.last_map_predict_time = predict_to_time
     
     
     def _predict_state_(self, delta_t):
         self.parameters.state_markov_predict_fn.parameters.delta_t = delta_t
         self.states = self.parameters.state_markov_predict_fn.handle(
           self.states, self.parameters.state_markov_predict_fn.parameters)
-        for i in range(self.parameters.state_parameters.num_particles):
+        # Store the current vehicla state so that this can be used in the map
+        # functions
+        for i in range(self.parameters.state_parameters["nparticles"]):
             setattr(self.maps[i].parameters.obs_fn.parameters, "parent_state", self.states[i])
             setattr(self.maps[i].parameters.pd_fn.parameters, "parent_state", self.states[i])
             setattr(self.maps[i].parameters.birth_fn.parameters, "parent_state", self.states[i])
@@ -183,34 +209,57 @@ class PHDSLAM(object):
     
     def _predict_map_(self, delta_t):
         self.parameters.state_parameters.delta_t = delta_t
-        [self.maps[i].phdPredict() for i in range(self.parameters.state_parameters.num_particles)]
+        [self.maps[i].phdPredict() for i in range(self.parameters.state_parameters["nparticles"])]
     
     
-    def update_with_feature(self):
+    def update_with_feature(self, observation_set, update_to_time):
+        if ((update_to_time > self.last_odo_predict_time) or 
+            (update_to_time > self.last_map_predict_time)):
+            self.predict(update_to_time)
+        self._update_map_with_features_(observation_set)
         pass
     
     
     def update_with_odometry(self, odometry, update_to_time):
-        if update_to_time > self.last_predict_time:
-            self.predict(update_to_time)
+        odo_delta_t = update_to_time - self.last_odo_predict_time
+        if odo_delta_t > 0:
+            self._predict_state_(odo_delta_t)
+            self.last_odo_predict_time = update_to_time
+        
         # Perform update here
         self._update_state_with_odometry_(odometry)
-        self.last_update_time = update_to_time
         
     
     def _update_state_with_odometry_(self, odometry):
+        # Evaluate the likelihood function to get the particle weights.
+        pass
+    
+    
+    def _rao_blackwellised__update_state_with_odometry(self, odometry):
+        # Use a RB particle filter for the state update
         pass
     
     
     def _update_state_with_features_(self):
-        
+        # Some form of product of weights of the features
         pass
     
     
     def _update_map_with_features_(self, observation_set):
-        [self.maps[i].phdUpdate(observation_set) for i in range(self.parameters.state_parameters.num_particles)]
-        
+        [self.maps[i].phdIterate(observation_set) 
+                for i in range(self.parameters.state_parameters["nparticles"])]
+    
     
     def resample(self):
-        pass
+        resample_index = misctools.get_resample_index(self.weights)
+        # self.states is a numpy array so the indexing operation forces a copy
+        resampled_states = self.states[resample_index]
+        resampled_maps = [self.maps[i].copy() for i in resample_index]
+        resampled_weights = (
+          np.ones(self.parameters.state_parameters["nparticles"], dtype=float)*
+          1/self.parameters.state_parameters["nparticles"])
+        
+        self.weights = resampled_weights
+        self.states = resampled_states
+        self.maps = resampled_maps
     

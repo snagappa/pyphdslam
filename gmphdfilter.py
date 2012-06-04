@@ -71,7 +71,7 @@ class GMSTATES(object):
                                           new_state.covariance())
         
     def copy(self):
-        state_copy = GMSTATES(0)
+        state_copy = self.__class__(0)
         state_copy._state_ = self._state_.copy()
         state_copy._covariance = self._covariance_
         return state_copy
@@ -79,7 +79,7 @@ class GMSTATES(object):
     def select(self, idx_vector, INPLACE=True):
         fn_return_val = None
         if not INPLACE:
-            state_copy = GMSTATES(0)
+            state_copy = self.__class__(0)
         else:
             state_copy = self
             fn_return_val = state_copy
@@ -92,7 +92,7 @@ class GMSTATES(object):
     def delete(self, idx_vector, INPLACE=True):
         fn_return_val = None
         if not INPLACE:
-            state_copy = GMSTATES(0)
+            state_copy = self.__class__(0)
         else:
             state_copy = self
             fn_return_val = state_copy
@@ -120,24 +120,26 @@ class GMPHD(PHD):
     Creates an object to evaluate the PHD of a multi-object distribution using
     a Gaussian mixture.
     """
-    def __init__(self, markov_predict_fn, obs_fn, likelihood_fn,
-                 state_update_fn, clutter_fn, birth_fn, ps_fn, pd_fn,
-                 estimate_fn,
-                 phd_parameters={"max_terms":100,
-                                 "elim_threshold":1e-4,
-                                 "merge_threshold":4}):
-        super(GMPHD, self).__init__(markov_predict_fn, obs_fn, likelihood_fn,
-                                    state_update_fn, clutter_fn, birth_fn,
-                                    ps_fn, pd_fn, estimate_fn, phd_parameters)
+    def __init__(self, *args, **kwargs):
         self.states = GMSTATES(0)
         self._states_ = GMSTATES(0)
-    
+        if len(args) or len(kwargs):
+            self.init(*args, **kwargs)
+            
     #def phdGenerateBirth(self, observation_set):
     #    birth_states, birth_weights = \
-    #        self.birth_fn.handle(observation_set, self.birth_fn.parameters)
+        #        self.birth_fn.handle(observation_set, self.birth_fn.parameters)
     #    return birth_states, birth_weights
         
-        
+    def init(self, markov_predict_fn, obs_fn, likelihood_fn, 
+             state_update_fn, clutter_fn, birth_fn, ps_fn, pd_fn,
+             estimate_fn, phd_parameters={"max_terms":100,
+                                          "elim_threshold":1e-4,
+                                          "merge_threshold":4}):
+        super(GMPHD, self).init(markov_predict_fn, obs_fn, likelihood_fn,
+                                    state_update_fn, clutter_fn, birth_fn,
+                                    ps_fn, pd_fn, estimate_fn, phd_parameters)
+    
     def phdUpdate(self, observation_set):
         num_observations = len(observation_set)
         if num_observations:
@@ -171,7 +173,7 @@ class GMPHD(PHD):
                             np.array([self.parameters.obs_fn.parameters.R]), 
                             None, INPLACE=True)#USE_NP=0)
         
-        new_gmstate = GMSTATES(0)
+        new_gmstate = self.states.__class__(0)
         # We need to update the states and find the updated weights
         for (_observation_, obs_count) in zip(observation_set, 
                                               range(num_observations)):
@@ -260,6 +262,8 @@ class GMPHD(PHD):
     def phdFlattenUpdate(self):
         self.states = self._states_
         self.weights = self._weights_
+        self._states_ = self._states_.__class(0)
+        self._weights_ = np.empty(0, dtype=float)
     
     
     def phdEstimate(self):
@@ -297,6 +301,8 @@ class GMPHD(PHD):
         self.phdFlattenUpdate()
         return estimates
     
+    
+##############################################################################
 def blas_KF_predict(state, covariance, F, Q, B=None, u=None):
     pred_state = blas.dgemv(F, state)
     if (not B==None) and (not u==None):
