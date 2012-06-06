@@ -84,7 +84,7 @@ class PHDSLAM(object):
         
         # Vehicle states
         self.states = np.zeros(self.parameters.state_parameters["nparticles"], 
-                              self.parameters.state_parameters.state_dims)
+                               self.parameters.state_parameters["ndims"])
         # Map of landmarks approximated by the PHD conditioned on vehicle state
         self.maps = [self.create_default_feature() 
                     for i in range(self.parameters.state_parameters["nparticles"])]
@@ -199,15 +199,15 @@ class PHDSLAM(object):
         self.parameters.state_markov_predict_fn.parameters.delta_t = delta_t
         self.states = self.parameters.state_markov_predict_fn.handle(
           self.states, self.parameters.state_markov_predict_fn.parameters)
+        
+    
+    def _predict_map_(self, delta_t):
         # Store the current vehicla state so that this can be used in the map
         # functions
         for i in range(self.parameters.state_parameters["nparticles"]):
             setattr(self.maps[i].parameters.obs_fn.parameters, "parent_state", self.states[i])
             setattr(self.maps[i].parameters.pd_fn.parameters, "parent_state", self.states[i])
             setattr(self.maps[i].parameters.birth_fn.parameters, "parent_state", self.states[i])
-        
-    
-    def _predict_map_(self, delta_t):
         self.parameters.state_parameters.delta_t = delta_t
         [self.maps[i].phdPredict() for i in range(self.parameters.state_parameters["nparticles"])]
     
@@ -249,6 +249,11 @@ class PHDSLAM(object):
         [self.maps[i].phdIterate(observation_set) 
                 for i in range(self.parameters.state_parameters["nparticles"])]
     
+    def get_state_estimate():
+        pass
+    
+    def get_map_estimate():
+        pass
     
     def resample(self):
         resample_index = misctools.get_resample_index(self.weights)

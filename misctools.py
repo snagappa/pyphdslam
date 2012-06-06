@@ -95,3 +95,6 @@ def mvnpdf(x, mu, sigma):
     pdf = np.exp(-0.5*exp_term)/np.sqrt(det_sigma*(2*np.pi)**x.shape[1]) 
     return pdf
     
+    
+def sample_mn_cv(*args, **kwargs):
+    pass

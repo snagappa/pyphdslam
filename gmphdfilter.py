@@ -513,7 +513,7 @@ def constant_detection(state, parameters):
     return parameters.pd*np.ones(len(state))
 
 
-def default_constant_position_model(dims=2):
+def default_constant_position_model(dims=3):
     markov_predict_fn_handle = markov_predict
     markov_predict_fn_parameters = PARAMETERS()
     markov_predict_fn_parameters.F = np.eye(dims)
