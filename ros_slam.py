@@ -57,12 +57,18 @@ class G500_SLAM():
         # Get default parameters
         slam_properties = girona500.g500_slam_fn_defs()
         # Add new parameters from ros config
+        # Process noise
         slam_properties.state_markov_predict_fn.parameters.process_noise = \
-                                                   self.config.model_covariance
+                                np.eye(3)*self.config.model_covariance
+        # GPS observation noise
         slam_properties.state_likelihood_fn.parameters.gps_obs_noise = \
-                                            self.config.gps_position_covariance
-        slam_properties.state_likelihood_fn.parameters.dvl_obs_noise = \
-                                            self.config.dvl_velocity_covariance
+                                np.eye(2)*self.config.gps_position_covariance
+        # DVL bottom velocity noise
+        slam_properties.state_likelihood_fn.parameters.dvl_bottom_noise = \
+                                np.eye(3)*self.config.dvl_bottom_velocity_covariance
+        # DVL water velocity noise
+        slam_properties.state_likelihood_fn.parameters.dvl_water_noise = \
+                                np.eye(3)*self.config.dvl_water_velocity_covariance
         return girona500.G500_PHDSLAM(*slam_properties)
         
         
@@ -126,7 +132,7 @@ class G500_SLAM():
         frame = PyKDL.Frame(r, v)
         #rospy.loginfo("Frame: %s", str(frame))
         return frame
-    
+    """
     def getConfig(self):
         self.config = PARAMETERS()
         if rospy.has_param("teledyne_explorer_dvl/tf") :
@@ -199,7 +205,86 @@ class G500_SLAM():
             self.config.max_init_time = rospy.get_param("localization/max_init_time")
         else:
             rospy.logfatal("localization/max_init_time not found in param list")
+        """
+    def getConfig(self):
+        self.config = PARAMETERS()
+        config = self.config
+        if rospy.has_param("teledyne_explorer_dvl/tf") :
+            config.dvl_tf_data = np.array(rospy.get_param("teledyne_explorer_dvl/tf"))
+        else:
+            rospy.logfatal("teledyne_explorer_dvl/tf param not found")
+
+        if rospy.has_param("tritech_igc_gyro/tf") :
+            config.imu_tf_data = np.array(rospy.get_param("tritech_igc_gyro/tf"))
+        else:
+            rospy.logfatal("tritech_igc_gyro/tf param not found")
+
+        if rospy.has_param("valeport_sound_velocity/tf") :
+            config.svs_tf_data = np.array(rospy.get_param("valeport_sound_velocity/tf"))
+        else:
+            rospy.logfatal("valeport_sound_velocity/tf param not found")
             
+#       Sensors & model covariance
+        if rospy.has_param("navigator/dvl_bottom_covariance") :
+            config.dvl_bottom_velocity_covariance = np.array(rospy.get_param('navigator/dvl_bottom_covariance'))
+        else:
+            rospy.logfatal("navigator/dvl_bottom_covariance param not found")
+        
+        if rospy.has_param("navigator/dvl_water_covariance") :
+            config.dvl_water_velocity_covariance = np.array(rospy.get_param('navigator/dvl_water_covariance'))
+        else:
+            rospy.logfatal("navigator/dvl_water_covariance param not found")
+
+        if rospy.has_param("navigator/gps_covariance") :
+            config.gps_position_covariance = rospy.get_param('navigator/gps_covariance')
+        else:
+            rospy.logfatal("navigator/gps_covariance param not found")
+            
+        if rospy.has_param("navigator/model_covariance") :
+            config.model_covariance = rospy.get_param('navigator/model_covariance')
+        else:
+            rospy.logfatal("navigator/model_covariance param not found")
+        
+        if rospy.has_param("navigator/dvl_max_v") :
+            config.dvl_max_v = rospy.get_param('navigator/dvl_max_v')
+        else:
+            rospy.logfatal("navigator/dvl_max_v not found")
+            
+        if rospy.has_param("navigator/gps_update"):
+            config.gps_update = rospy.get_param('navigator/gps_update')
+        else:
+            rospy.logfatal("navigator/gps_update not found")
+        
+        if rospy.has_param("navigator/gps_init_samples"):
+            config.gps_init_samples = rospy.get_param('navigator/gps_init_samples')
+        else:
+            rospy.logfatal("navigator/gps_init_samples not found")
+            
+        if rospy.has_param("navigator/check_sensors_period"):
+            config.check_sensors_period = rospy.get_param('navigator/check_sensors_period')
+        else:
+            rospy.logfatal("navigator/check_sensors_period not found")
+            
+        if rospy.has_param("navigator/dvl_max_period_error"):
+            config.dvl_max_period_error = rospy.get_param('navigator/dvl_max_period_error')
+        else:
+            rospy.logfatal("navigator/dvl_max_period_error not found")
+
+        if rospy.has_param("navigator/svs_max_period_error"):
+            config.svs_max_period_error = rospy.get_param('navigator/svs_max_period_error')
+        else:
+            rospy.logfatal("navigator/csvs_max_period_error not found")
+            
+        if rospy.has_param("navigator/imu_max_period_error"):
+            config.imu_max_period_error = rospy.get_param('navigator/imu_max_period_error')
+        else:
+            rospy.logfatal("navigator/imu_max_period_error not found")
+            
+        if rospy.has_param("navigator/max_init_time") :
+            config.max_init_time = rospy.get_param("navigator/max_init_time")
+        else:
+            rospy.logfatal("navigator/max_init_time not found in param list")
+    
     
     def updateGps(self, gps):
         if gps.data_quality >= 1 and gps.latitude_hemisphere >= 0 and gps.longitude_hemisphere >= 0:
@@ -218,7 +303,7 @@ class G500_SLAM():
                 
                 #Right now the GPS is only used to initialize the navigation not for updating it!!!
                 if distance < 0.1:
-                    if self.makePrediction():
+                    if self.makePrediction(gps.header.stamp):
                         #z = array([gps.north, gps.east])
                         self.setNavigation(gps)
                         #self.publishData()
@@ -227,7 +312,7 @@ class G500_SLAM():
         
     def updateTeledyneExplorerDvl(self, dvl):
         config = self.config
-        config.dvl_last_update = rospy.Time.now()
+        config.dvl_last_update = dvl.header.stamp
         config.dvl_init = True
         
         # If dvl_update == 0 --> No update
@@ -271,9 +356,14 @@ class G500_SLAM():
             distance = config.dvl_tf_data[0:3]
             self.vehicle.twist_linear -= np.cross(angular_velocity, distance)
             
-            self.makePrediction()
-            dvl_reference = "bottom" if dvl_update == 1 else "water"
-            self.vehicle.dvlUpdate(self.vehicle.twist_linear, dvl_reference)
+            self.makePrediction(config.dvl_last_update)
+            #dvl_reference = "bottom" if dvl_update == 1 else "water"
+            likelihood_params = self.slam_worker.state_likelihood_fn.parameters
+            likelihood_params.dvl_obs_noise = \
+                likelihood_params.dvl_bottom_noise if dvl_update==1 else \
+                likelihood_params.dvl_water_noise
+            #self.slam_worker.state_likelihood_fn.parameters.dvl_obs_noise = dvl_reference
+            self.slam_worker.dvl_update(self.vehicle.twist_linear)
             
         else:
             rospy.loginfo('%s, invalid DVL velocity measurement!', self.name)
@@ -291,13 +381,12 @@ class G500_SLAM():
         svs_trans = vehicle_rpy * svs_trans
         svs_data = svs_data + svs_trans
         self.vehicle.pose_position[2] = svs_data[2]
-        self.makePrediction()
-        self.vehicle.svsUpdate(self.vehicle.pose_position[2])
+        self.makePrediction(svs.header.stamp)
+        self.slam_worker.svs_update(self.vehicle.pose_position[2])
 
 
     def updateImu(self, imu):
         config = self.config
-        config.imu_last_update = rospy.Time.now()
         config.imu_init = True
         
         pose_angle = tf.transformations.euler_from_quaternion(
@@ -315,23 +404,25 @@ class G500_SLAM():
             pose_angle_quaternion = tf.transformations.quaternion_from_euler(*pose_angle)
             self.vehicle.pose_orientation = pose_angle_quaternion
             
-            # Derive angular velocities from orientations ####################### 
+            # Derive angular velocities from orientations #####################
             period = (imu.header.stamp - config.last_imu_update).to_sec()
             
-            self.vehicle.twist_angular = normalizeAngle(pose_angle-config.last_imu_orientation)/period
+            self.vehicle.twist_angular = normalizeAngle(
+                                pose_angle-config.last_imu_orientation)/period
             
-            self.last_imu_orientation = pose_angle
-            self.last_imu_update = imu.header.stamp          
-            #####################################################################
+            config.last_imu_orientation = pose_angle
+            config.last_imu_update = imu.header.stamp          
+            ###################################################################
             
-            self.makePrediction()
+            self.makePrediction(config.last_imu_update)
 
         
-    def makePrediction(self):
+    def makePrediction(self, predict_to_time):
         config = self.config
         if not config.init:
             if config.imu_data and config.gps_data:
-                time_now = rospy.Time.now()
+                #time_now = rospy.Time.now()
+                time_now = predict_to_time
                 config.last_prediction = time_now
                 self.slam_worker.last_odo_predict_time = time_now.to_sec()
                 # Initialise slam worker with north and east co-ordinates
@@ -344,7 +435,8 @@ class G500_SLAM():
             return False
         else:
             pose_angle = tf.transformations.euler_from_quaternion(*self.vehicle.pose_orientation)
-            time_now = rospy.Time.now()
+            #time_now = rospy.Time.now()
+            time_now = predict_to_time
             config.last_prediction = time_now
             time_now = time_now.to_sec()
             self.slam_worker.predict_state(pose_angle, time_now)

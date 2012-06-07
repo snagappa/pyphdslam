@@ -17,6 +17,8 @@ import gmphdfilter
 import phdslam
 import numpy as np
 import misctools
+import blas_tools as blas
+
 
 SLAM_FN_DEFS = collections.namedtuple("SLAM_FN_DEFS", 
                 "state_markov_predict_fn state_obs_fn state_likelihood_fn \
@@ -80,81 +82,63 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
     def predict_state(self, u, predict_to_time):
         delta_t = self.last_odo_predict_time - predict_to_time
         self.last_odo_predict_time = predict_to_time
-        g500_state_predict(self.states, u, delta_t, INPLACE=True)
+        predict_fn = self.parameters.state_markov_predict_fn
+        self.states = predict_fn.handle(self.states, u, delta_t, 
+                                        predict_fn.parameters)
     
     
+    def update_gps(self, gps_obs):
+        pred_gps_obs = self.state[:,0:2]
+        likelihood = misctools.mvnpdf(np.array([gps_obs]), pred_gps_obs, 
+                np.array([self.parameters.state_likelihood_fn.parameters.gps_obs_noise]))
+        self.weights *= likelihood
+    
+    def update_dvl(self, dvl_obs):
+        pred_dvl_obs = self.state[:,3:]
+        likelihood = misctools.mvnpdf(np.array([dvl_obs]), pred_dvl_obs,
+                np.array([self.parameters.state_likelihood_fn.parameters.dvl_obs_noise]))
+        self.weights *= likelihood
+    
+    def update_svs(self, svs_obs):
+        pred_svs_obs = self.state[:,2]
+        likelihood = misctools.mvnpdf(np.array([svs_obs]), pred_svs_obs,
+                np.array([0.2]))
+        self.weights *= likelihood
     
 #state_markov_predict_fn
-def g500_state_predict(states, u, delta_t, INPLACE=True):
-    if not INPLACE:
-        states = states.copy()
-    roll = u[0]
-    pitch = u[1]
-    yaw = u[2]
-    x1 = x_1[0]
-    y1 = x_1[1]
-    vx1 = x_1[2]
-    vy1 = x_1[3]
-    vz1 = x_1[4]
-    x = zeros(5)
+def g500_state_predict(states, u, delta_t, parameters):
+    # u is assumed to be ordered as [roll, pitch, yaw]
+    r, p, y = 0, 1, 2
+    # Evaluate cosine and sine of roll, pitch, yaw
+    c = np.cos(u)
+    s = np.sin(u)
     
-    # Compute Prediction Model with constant velocity
-    x[0] = x1 + cos(pitch)*cos(yaw)*vx1*t - cos(roll)*sin(yaw)*vy1*t + sin(roll)*sin(pitch)*cos(yaw)*vy1*t + sin(roll)*sin(yaw)*vz1*t + cos(roll)*sin(pitch)*cos(yaw)*vz1*t
-    x[1] = y1 + cos(pitch)*sin(yaw)*vx1*t + cos(roll)*cos(yaw)*vy1*t + sin(roll)*sin(pitch)*sin(yaw)*vy1*t - sin(roll)*cos(yaw)*vz1*t + cos(roll)*sin(pitch)*sin(yaw)*vz1*t
-    x[2] = vx1
-    x[3] = vy1        
-    x[4] = vz1
+    # Specify the rotation matrix
+    # See http://en.wikipedia.org/wiki/Rotation_matrix
+    R = delta_t * np.array(
+            [[c[p]*c[y], -c[r]*s[y]+s[r]*s[p]*c[y], s[r]*s[y]+c[r]*s[p]*c[y] ],
+             [c[p]*s[y], c[r]*c[y]+s[r]*s[p]*s[y], -s[r]*c[y]+c[r]*s[p]*s[y] ],
+             [-s[p], s[r]*c[p], c[r]*c[p] ]])
+    # Transition matrix
+    F = np.array([ np.vstack(( np.hstack((np.eye(3), R)),
+                               np.hstack((np.zeros(3), np.eye(3))) )) ])
+    # Multiply the transition matrix with each state
+    pred_states = blas.dgemv(F, states, beta=0.0)
     
+    ## Add white Gaussian noise to the predicted states
+    # Compute scaling for the noise
+    scale_matrix = np.array([np.vstack((R*delta_t/2,
+                              np.eye(3)))])
+    process_noise = np.array([parameters.process_noise])
+    # Compute the process noise as scale_matrix*process_noise*scale_matrix'
+    Q = blas.dgemm(scale_matrix, 
+                   blas.dgemm(process_noise, scale_matrix, 
+                              TRANSPOSE_B=True, beta=0.0), beta=0.0)[0]
     
-    #A = self.computeA(u, t)
-    roll = u[0]
-    pitch = u[1]
-    yaw = u[2]
+    pred_states += np.random.multivariate_normal(mean=np.zeros(6, dtype=float),
+                                                 cov=Q, size=(states.shape))
+    return pred_states
     
-    A = eye(5)
-    A[0,2] = cos(pitch)*cos(yaw)*t
-    A[0,3] = -cos(roll)*sin(yaw)*t + sin(roll)*sin(pitch)*cos(yaw)*t
-    A[0,4] = sin(roll)*sin(yaw)*t + cos(roll)*sin(pitch)*cos(yaw)*t
-    A[1,2] = cos(pitch)*sin(yaw)*t
-    A[1,3] = cos(roll)*cos(yaw)*t + sin(roll)*sin(pitch)*sin(yaw)*t
-    A[1,4] = -sin(roll)*cos(yaw)*t + cos(roll)*sin(pitch)*sin(yaw)*t
-        
-    W = self.computeW(u, t)
-    self._x_ = self.f(self.x, u, t)
-    self._P_ = dot(dot(A, self.P), A.T) + dot(dot(W, self.Q), W.T)
-    
-    def computeA(self, u, t):
-        
-        return A
-        
-        
-    def computeQ(self, q_var):
-        Q = eye(3)
-        return Q*q_var
-    
-    
-    
-    
-    return True
-    
-
-def state_obs_fn():
-    pass
-
-def state_likelihood_fn():
-    pass
-
-def state__state_update_fn():
-    pass
-
-def g500_state_to_dvl_obs(*args, **kwargs):
-    pass
-
-def dvl_likelihood(*args, **kwargs):
-    pass
-
-#def gps_likelihood(*args, **kwargs):
-#    pass
 
 
 def g500_slam_fn_defs():
@@ -164,12 +148,12 @@ def g500_slam_fn_defs():
     state_markov_predict_fn = fn_params(state_markov_predict_fn_handle,
                                             state_markov_predict_fn_parameters)
     # Vehicle state to observation space
-    state_obs_fn_handle = g500_state_to_dvl_obs
+    state_obs_fn_handle = None
     state_obs_fn_parameters = PARAMETERS()
     state_obs_fn = fn_params(state_obs_fn_handle, state_obs_fn_parameters)
     
     # Likelihood function for importance sampling
-    state_likelihood_fn_handle = dvl_likelihood
+    state_likelihood_fn_handle = None
     state_likelihood_fn_parameters = PARAMETERS()
     state_likelihood_fn = fn_params(state_likelihood_fn_handle, 
                                     state_likelihood_fn_parameters)
@@ -181,7 +165,7 @@ def g500_slam_fn_defs():
                                            state__state_update_fn_parameters)
     
     # State estimation from particles
-    state_estimate_fn_handle = misctools.sample_mn_cv
+    state_estimate_fn_handle = None #misctools.sample_mn_cv
     state_estimate_fn_parameters = PARAMETERS()
     state_estimate_fn = fn_params(state_estimate_fn_handle,
                                   state_estimate_fn_parameters)
@@ -192,7 +176,8 @@ def g500_slam_fn_defs():
     # We only need to estimate x,y,z. The roll, pitch and yaw must be fed
     # externally
     state_parameters = {"nparticles":48,
-                        "ndims":6}
+                        "ndims":6,
+                        "resample_threshold":0.6}
     
     
     # Parameters for the PHD filter

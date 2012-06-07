@@ -225,11 +225,13 @@ def ddot(x, y):
     Given two vectors x and y, return transpose(x)*y
     
     Parameters
+    ----------
     *x, y*: two dimensional ndarray, shape (Mx, N) and (My, N), Mx==My or \
             Mx==1 or My==1, where each row corresponds to a single \
             vector. Elements of x and y must have the same dimensions N. 
     
     Returns
+    -------
     *z:* ndarray corresponding to the dot product of the elements of x and y.
     
     """
@@ -852,7 +854,6 @@ def dposv(A, b, INPLACE=False, OVERWRITE_A=False):
     """
     Solve the set of linear equations for the symmetric matrix A and vector b
     
-    
     """
     if DEBUG:
         assert_valid_matrix(A, "A")
@@ -927,77 +928,7 @@ def symmetrise(A, UPLO):
                  extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
     
 
-    
-def dgemv_old(A, x, alpha=1.0, beta=0.0, y=None, TRANSPOSE_A=False):
-    A_is = whatisit(A)
-    x_is = whatisit(x)
-    A_consistent_type = A_is.consistent_type()
-    x_consistent_type = x_is.consistent_type()
-    
-    assert A_consistent_type == x_consistent_type, "A and x must have consistent types"
-    if not (y == None):
-        y_is = whatisit(y)
-        y_consistent_type = y_is.consistent_type
-        assert A_consistent_type == y_consistent_type, "A, x and y must have consistent types"
-    
-    assert A_consistent_type in [np.ndarray, list], "Valid type must be used"
-    y_is = copy.deepcopy(x_is)
-    if not (A_is.shape[0] == x_is.shape[0]):
-        y_is.shape = ((max([A_is.shape[0],x_is.shape[0]]),) + x_is.shape[1:])
-    
-    x_shape = x_is.shape
-    A_shape = A_is.shape
-    if np.isscalar(alpha):
-        alpha = np.array([alpha], dtype=float)
-    assert type(alpha) == np.ndarray, "alpha must be of type scalar float or float ndarray"
-    assert len(alpha) in [1, x_shape[0]], "alpha must be a scalar or have same length as x"
-    
-    y = zeros(y_is)
-    assert A.flags.c_contiguous or A.flags.f_contiguous, "blas_tools.dgemv may only be used with contiguous data"
-    C_CONTIGUOUS = A.flags.c_contiguous
-    weave.inline(blas_tools_c_code.npdgemv.code, 
-                 blas_tools_c_code.npdgemv.python_vars, 
-                 libraries=blas_tools_c_code.npdgemv.libraries,
-                 support_code=blas_tools_c_code.npdgemv.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
-    return y
-    """
-    if A_consistent_type == list:
-        y = zeros(y_is)
-        weave.inline(blas_tools_c_code.ldgemv.code, 
-                     blas_tools_c_code.ldgemv.python_vars, 
-                     libraries=blas_tools_c_code.ldgemv.libraries,
-                     support_code=blas_tools_c_code.ldgemv.support_code,
-                     extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
-        
-    elif A_consistent_type == np.ndarray:
-        y = zeros(y_is)
-        assert A.flags.c_contiguous or A.flags.f_contiguous, "blas_tools.dgemv may only be used with contiguous data"
-        C_CONTIGUOUS = A.flags.c_contiguous
-        weave.inline(blas_tools_c_code.npdgemv.code, 
-                     blas_tools_c_code.npdgemv.python_vars, 
-                     libraries=blas_tools_c_code.npdgemv.libraries,
-                     support_code=blas_tools_c_code.npdgemv.support_code,
-                     extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
-                     
-    
-    elif A_consistent_type in [LIST_OF_NDARRAY, LIST_OF_MATRIX]:
-        assert A.flags.c_contiguous or A.flags.f_contiguous, "blas_tools.dgemv may only be used with contiguous data"
-        
-        y_is.consistent_type = np.ndarray
-        y = zeros(y_is)
-        x = np.array(x)
-        weave.inline(blas_tools_c_code.npdgemv.code, 
-                     blas_tools_c_code.npdgemv.python_vars, 
-                     libraries=blas_tools_c_code.npdgemv.libraries,
-                     support_code=blas_tools_c_code.npdgemv.support_code,
-                     extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
-        y = [y[i] for i in range(len(y))]
-    
-    return y
-    """
-    
-    
+
 def test_ddot(num_elements=1000, num_dims=4):
     print "Computing dot product..."
     x = np.random.rand(num_elements, num_dims)

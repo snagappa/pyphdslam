@@ -27,7 +27,7 @@ import gmphdfilter
 from phdfilter import PARAMETERS
 import numpy as np
 import misctools
-
+import blas_tools as blas
 
 #def placeholder():
 #    return (lambda:0)
@@ -91,6 +91,12 @@ class PHDSLAM(object):
         # Particle weights
         self.weights = 1/self.parameters.state_parameters["nparticles"]* \
                         np.ones(self.parameters.state_parameters["nparticles"])
+        
+        # Estimates
+        self._estimate_ = PARAMETERS()
+        self._estimate_.state = np.empty(0)
+        self._estimate_.map = self.maps[0]
+        
         # Time from last update
         self.last_odo_predict_time = 0
         self.last_map_predict_time = 0
@@ -249,13 +255,31 @@ class PHDSLAM(object):
         [self.maps[i].phdIterate(observation_set) 
                 for i in range(self.parameters.state_parameters["nparticles"])]
     
-    def get_state_estimate():
-        pass
+    def get_estimate(self):
+        if self.state_estimate_fn.handle != None:
+            return self.state_estimate_fn.handle(self.weights, 
+                                                 self.states, self.maps)
+        self._state_estimate_()
+        self._map_estimate_()
+        return self._estimate_.state.copy(), self._estimate_.map.copy()
+        
+    def _state_estimate_(self):
+        weighted_states = self.states.copy()
+        blas.dscal(self.weights, weighted_states)
+        self._estimate_.state = weighted_states
     
-    def get_map_estimate():
-        pass
+    def _map_estimate_(self):
+        max_weight_idx = np.argmax(self.weights)
+        self._estimate_.map = self.maps[max_weight_idx]
     
     def resample(self):
+        # Effective number of particles
+        eff_nparticles = 1/np.power(self.weights, 2).sum()
+        resample_threshold = eff_nparticles/self.state_parameters["nparticles"]
+        # Check if we have particle depletion
+        if resample_threshold > self.state_parameters["resample_threshold"]:
+            return
+        # Otherwise we need to resample
         resample_index = misctools.get_resample_index(self.weights)
         # self.states is a numpy array so the indexing operation forces a copy
         resampled_states = self.states[resample_index]
