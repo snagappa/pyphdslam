@@ -46,22 +46,22 @@ class GMPHD_SLAM_FEATURE(gmphdfilter.GMPHD):
                                     ps_fn, pd_fn, estimate_fn, phd_parameters)
         
         
-        def phdIterate(self, observations):
-            # Update existing states
-            self.phdUpdate(observations)
-            # Generate estimates
-            #estimates = self.phdEstimate()
-            # Prune low weight Gaussian components
-            self.phdPrune()
-            # Create birth terms from measurements
-            birth_states, birth_weights = self.phdGenerateBirth(observations)
-            # Append birth terms to Gaussian mixture
-            self.phdAppendBirth(birth_states, birth_weights)
-            # Merge components
-            self.phdMerge()
-            # End of iteration call
-            self.phdFlattenUpdate()
-            #return estimates
+    def phdIterate(self, observations):
+        # Update existing states
+        self.phdUpdate(observations)
+        # Generate estimates
+        #estimates = self.phdEstimate()
+        # Prune low weight Gaussian components
+        self.phdPrune()
+        # Create birth terms from measurements
+        birth_states, birth_weights = self.phdGenerateBirth(observations)
+        # Append birth terms to Gaussian mixture
+        self.phdAppendBirth(birth_states, birth_weights)
+        # Merge components
+        self.phdMerge()
+        # End of iteration call
+        self.phdFlattenUpdate()
+        #return estimates
 
 
 class PHDSLAM(object):
@@ -87,7 +87,7 @@ class PHDSLAM(object):
                                self.parameters.state_parameters["ndims"])
         # Map of landmarks approximated by the PHD conditioned on vehicle state
         self.maps = [self.create_default_feature() 
-                    for i in range(self.parameters.state_parameters["nparticles"])]
+                for i in range(self.parameters.state_parameters["nparticles"])]
         # Particle weights
         self.weights = 1/self.parameters.state_parameters["nparticles"]* \
                         np.ones(self.parameters.state_parameters["nparticles"])
@@ -174,7 +174,8 @@ class PHDSLAM(object):
             try:
                 getattr(self.parameters, parameter_name)
             except AttributeError:
-                print "Parameter ", parameter_name, " does not exist. Add it first"
+                print \
+                  "Parameter ", parameter_name, " does not exist. Add it first"
                 return
         setattr(self.parameters, parameter_name, new_value)
         
@@ -211,11 +212,15 @@ class PHDSLAM(object):
         # Store the current vehicla state so that this can be used in the map
         # functions
         for i in range(self.parameters.state_parameters["nparticles"]):
-            setattr(self.maps[i].parameters.obs_fn.parameters, "parent_state", self.states[i])
-            setattr(self.maps[i].parameters.pd_fn.parameters, "parent_state", self.states[i])
-            setattr(self.maps[i].parameters.birth_fn.parameters, "parent_state", self.states[i])
+            setattr(self.maps[i].parameters.obs_fn.parameters, 
+                    "parent_state", self.states[i])
+            setattr(self.maps[i].parameters.pd_fn.parameters, 
+                    "parent_state", self.states[i])
+            setattr(self.maps[i].parameters.birth_fn.parameters, 
+                    "parent_state", self.states[i])
         self.parameters.state_parameters.delta_t = delta_t
-        [self.maps[i].phdPredict() for i in range(self.parameters.state_parameters["nparticles"])]
+        [self.maps[i].phdPredict() 
+                for i in range(self.parameters.state_parameters["nparticles"])]
     
     
     def update_with_feature(self, observation_set, update_to_time):
@@ -223,7 +228,6 @@ class PHDSLAM(object):
             (update_to_time > self.last_map_predict_time)):
             self.predict(update_to_time)
         self._update_map_with_features_(observation_set)
-        pass
     
     
     def update_with_odometry(self, odometry, update_to_time):
@@ -256,8 +260,8 @@ class PHDSLAM(object):
                 for i in range(self.parameters.state_parameters["nparticles"])]
     
     def get_estimate(self):
-        if self.state_estimate_fn.handle != None:
-            return self.state_estimate_fn.handle(self.weights, 
+        if self.parameters.state_estimate_fn.handle != None:
+            return self.parameters.state_estimate_fn.handle(self.weights, 
                                                  self.states, self.maps)
         self._state_estimate_()
         self._map_estimate_()
@@ -275,9 +279,11 @@ class PHDSLAM(object):
     def resample(self):
         # Effective number of particles
         eff_nparticles = 1/np.power(self.weights, 2).sum()
-        resample_threshold = eff_nparticles/self.state_parameters["nparticles"]
+        resample_threshold = (
+                eff_nparticles/self.parameters.state_parameters["nparticles"])
         # Check if we have particle depletion
-        if resample_threshold > self.state_parameters["resample_threshold"]:
+        if (resample_threshold > 
+                    self.parameters.state_parameters["resample_threshold"]):
             return
         # Otherwise we need to resample
         resample_index = misctools.get_resample_index(self.weights)

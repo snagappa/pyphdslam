@@ -1,9 +1,26 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-Created on Sat Jun  2 16:56:18 2012
-
-@author: snagappa
-"""
+#
+#       girona500.py
+#       
+#       Copyright 2012 Sharad Nagappa <snagappa@gmail.com>
+#       
+#       This program is free software; you can redistribute it and/or modify
+#       it under the terms of the GNU General Public License as published by
+#       the Free Software Foundation; either version 2 of the License, or
+#       (at your option) any later version.
+#       
+#       This program is distributed in the hope that it will be useful,
+#       but WITHOUT ANY WARRANTY; without even the implied warranty of
+#       MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#       GNU General Public License for more details.
+#       
+#       You should have received a copy of the GNU General Public License
+#       along with this program; if not, write to the Free Software
+#       Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+#       MA 02110-1301, USA.
+#       
+#      
 
 """
 Module containing the dynamics of Girona 500. These functions should be 
@@ -18,7 +35,7 @@ import phdslam
 import numpy as np
 import misctools
 import blas_tools as blas
-
+import rospy
 
 SLAM_FN_DEFS = collections.namedtuple("SLAM_FN_DEFS", 
                 "state_markov_predict_fn state_obs_fn state_likelihood_fn \
@@ -50,28 +67,28 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         
         
     def get_states(self, rows=None, cols=None):
-        if rows==None:
-            rows = range(self.state_parameters["nparticles"])
-        if cols==None:
-            cols = range(self.state_parameters["ndims"])
-        return self.states[rows,cols]
+        if rows == None:
+            rows = range(self.parameters.state_parameters["nparticles"])
+        if cols == None:
+            cols = range(self.parameters.state_parameters["ndims"])
+        return self.states[rows, cols]
     
     def x(self, idx=None):
-        return self.get_states(cols=0)
+        return self.get_states(idx, cols=0)
     def y(self, idx=None):
-        return self.get_states(cols=1)
+        return self.get_states(idx, cols=1)
     def z(self, idx=None):
-        return self.get_states(cols=2)
+        return self.get_states(idx, cols=2)
     def vx(self, idx=None):
-        return self.get_states(cols=3)
+        return self.get_states(idx, cols=3)
     def vy(self, idx=None):
-        return self.get_states(cols=4)
+        return self.get_states(idx, cols=4)
     def vz(self, idx=None):
-        return self.get_states(cols=5)
+        return self.get_states(idx, cols=5)
     
     def reset_states(self):
         self.states[:] = 0
-        self.weights = 1/self.parameters.state_parameters["nparticles"]* \
+        self.weights = 1/self.parameters.parameters.state_parameters["nparticles"]* \
                         np.ones(self.parameters.state_parameters["nparticles"])
                         
     def reset_maps(self):
@@ -79,64 +96,65 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
                     for i in range(self.parameters.state_parameters["nparticles"])]
     
     
-    def predict_state(self, u, predict_to_time):
+    def predict_state(self, ctrl_input, predict_to_time):
         delta_t = self.last_odo_predict_time - predict_to_time
         self.last_odo_predict_time = predict_to_time
         predict_fn = self.parameters.state_markov_predict_fn
-        self.states = predict_fn.handle(self.states, u, delta_t, 
+        self.states = predict_fn.handle(self.states, ctrl_input, delta_t, 
                                         predict_fn.parameters)
     
     
     def update_gps(self, gps_obs):
-        pred_gps_obs = self.state[:,0:2]
+        pred_gps_obs = self.states[:, 0:2]
         likelihood = misctools.mvnpdf(np.array([gps_obs]), pred_gps_obs, 
                 np.array([self.parameters.state_likelihood_fn.parameters.gps_obs_noise]))
         self.weights *= likelihood
     
     def update_dvl(self, dvl_obs):
-        pred_dvl_obs = self.state[:,3:]
+        pred_dvl_obs = self.states[:, 3:]
         likelihood = misctools.mvnpdf(np.array([dvl_obs]), pred_dvl_obs,
                 np.array([self.parameters.state_likelihood_fn.parameters.dvl_obs_noise]))
         self.weights *= likelihood
     
     def update_svs(self, svs_obs):
-        pred_svs_obs = self.state[:,2]
+        pred_svs_obs = self.states[:, 2]
         likelihood = misctools.mvnpdf(np.array([svs_obs]), pred_svs_obs,
                 np.array([0.2]))
         self.weights *= likelihood
     
 #state_markov_predict_fn
-def g500_state_predict(states, u, delta_t, parameters):
+def g500_state_predict(states, ctrl_input, delta_t, parameters):
     # u is assumed to be ordered as [roll, pitch, yaw]
     r, p, y = 0, 1, 2
     # Evaluate cosine and sine of roll, pitch, yaw
-    c = np.cos(u)
-    s = np.sin(u)
+    c = np.cos(ctrl_input)
+    s = np.sin(ctrl_input)
     
     # Specify the rotation matrix
     # See http://en.wikipedia.org/wiki/Rotation_matrix
-    R = delta_t * np.array(
+    rot_mat = delta_t * np.array(
             [[c[p]*c[y], -c[r]*s[y]+s[r]*s[p]*c[y], s[r]*s[y]+c[r]*s[p]*c[y] ],
              [c[p]*s[y], c[r]*c[y]+s[r]*s[p]*s[y], -s[r]*c[y]+c[r]*s[p]*s[y] ],
              [-s[p], s[r]*c[p], c[r]*c[p] ]])
     # Transition matrix
-    F = np.array([ np.vstack(( np.hstack((np.eye(3), R)),
+    trans_mat = np.array([ np.vstack(( np.hstack((np.eye(3), rot_mat)),
                                np.hstack((np.zeros(3), np.eye(3))) )) ])
     # Multiply the transition matrix with each state
-    pred_states = blas.dgemv(F, states, beta=0.0)
+    pred_states = blas.dgemv(trans_mat, states, beta=0.0)
     
     ## Add white Gaussian noise to the predicted states
     # Compute scaling for the noise
-    scale_matrix = np.array([np.vstack((R*delta_t/2,
+    scale_matrix = np.array([np.vstack((rot_mat*delta_t/2,
                               np.eye(3)))])
     process_noise = np.array([parameters.process_noise])
     # Compute the process noise as scale_matrix*process_noise*scale_matrix'
-    Q = blas.dgemm(scale_matrix, 
+    sc_process_noise = blas.dgemm(scale_matrix, 
                    blas.dgemm(process_noise, scale_matrix, 
                               TRANSPOSE_B=True, beta=0.0), beta=0.0)[0]
     
     pred_states += np.random.multivariate_normal(mean=np.zeros(6, dtype=float),
-                                                 cov=Q, size=(states.shape))
+                                                 cov=sc_process_noise, 
+                                                 size=(states.shape))
     return pred_states
     
 
@@ -246,4 +264,50 @@ def g500_slam_fn_defs():
                         feature_likelihood_fn, feature__state_update_fn,
                         clutter_fn, birth_fn, ps_fn, pd_fn,
                         feature_estimate_fn, feature_parameters)
+    
+def add_ros_param(container, param):
+    subst_names = {"teledyne_explorer_dvl" : "dvl",
+                   "tritech_igc_gyro" : "imu",
+                   "valeport_sound_velocity" : "svs"}
+    if rospy.has_param(param):
+        param_value = np.array(rospy.get_param(param))
+    else:
+        rospy.logfatal(param + " param not found")
+    
+    # Check if param is a tf frame - we need to prefix the tf with a unique
+    # identifier
+    if param[-3:] == "/tf":
+        if param[0] == '/':
+            param = param[1:]
+        # select a substitution if specified
+        sensor = param[0:param.find("/")]
+        if sensor in subst_names:
+            sensor = subst_names[sensor]
+        param_name = sensor + "_tf_data"
+        
+    else:
+        param_name = param[param.rfind('/')+1:]
+    setattr(container, param_name, param_value)
+    
+    
+def get_config():
+    config = PARAMETERS()
+    ros_param_list = ["teledyne_explorer_dvl/tf",
+                      "tritech_igc_gyro/tf",
+                      "valeport_sound_velocity/tf",
+                      "navigator/dvl_bottom_covariance",
+                      "navigator/dvl_water_covariance",
+                      "navigator/gps_covariance",
+                      "navigator/model_covariance",
+                      "navigator/dvl_max_v",
+                      "navigator/gps_update",
+                      "navigator/gps_init_samples",
+                      "navigator/check_sensors_period",
+                      "navigator/dvl_max_period_error",
+                      "navigator/svs_max_period_error",
+                      "navigator/imu_max_period_error",
+                      "navigator/max_init_time" ]
+    for param in ros_param_list:
+        add_ros_param(config, param)
+    return config
     
