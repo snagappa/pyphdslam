@@ -59,7 +59,7 @@ class GMSTATES(object):
         return self._state_
         
     def covariance(self):
-        return self._covariance
+        return self._covariance_
         
     def append(self, new_state):
         if self._state_.shape[0] == 0 or self._state_.shape[1] == 0:
@@ -141,6 +141,8 @@ class GMPHD(PHD):
                                     ps_fn, pd_fn, estimate_fn, phd_parameters)
     
     def phdUpdate(self, observation_set):
+        # Container for slam parent update
+        slam_info = PARAMETERS()
         num_observations = len(observation_set)
         if num_observations:
             z_dim = observation_set.shape[1]
@@ -162,6 +164,9 @@ class GMPHD(PHD):
         #   -- same for all detection terms
         self.weights.__imul__(detection_probability)
         
+        # SLAM,  step 1:
+        slam_info.exp_sum__pd_predwt = np.exp(-self.weights.sum())
+        
         # Split x and P out from the combined state vector
         detected_states = self.states[detection_probability > 0.1]
         x = detected_states.state
@@ -173,6 +178,9 @@ class GMPHD(PHD):
                             np.array([self.parameters.obs_fn.parameters.R]), 
                             None, INPLACE=True)#USE_NP=0)
         
+        # SLAM, prep for step 2:
+        slam_info.sum__clutter_with_pd_updwt = np.zeros(num_observations)
+        # Container for the updated states
         new_gmstate = self.states.__class__(0)
         # We need to update the states and find the updated weights
         for (_observation_, obs_count) in zip(observation_set, 
@@ -192,7 +200,11 @@ class GMPHD(PHD):
             
             new_weight = self.weights*x_pdf
             # Normalise the weights
-            new_weight.__idiv__(clutter_pdf[obs_count] + new_weight.sum())
+            normalisation_factor = clutter_pdf[obs_count] + new_weight.sum()
+            new_weight.__idiv__(normalisation_factor)
+            # SLAM, step 2:
+            slam_info.sum__clutter_with_pd_updwt[obs_count] = \
+                                                        normalisation_factor
             
             # Create new state with new_x and P to add to _states_
             new_gmstate.set(new_x, P)
@@ -200,7 +212,10 @@ class GMPHD(PHD):
             self._weights_ += [new_weight]
             
         self._weights_ = np.concatenate(self._weights_)
-        
+        # SLAM, finalise:
+        slam_info.likelihood = (slam_info.exp_sum__pd_predwt * 
+                                slam_info.sum__clutter_with_pd_predwt.prod())
+        return slam_info
     
     def phdPrune(self):
         if (self.parameters.phd_parameters['elim_threshold'] <= 0):

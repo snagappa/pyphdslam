@@ -47,8 +47,12 @@ class GMPHD_SLAM_FEATURE(gmphdfilter.GMPHD):
         
         
     def phdIterate(self, observations):
+        """
+        Performs a single iteration of the PHD filter except for the 
+        prediction.
+        """
         # Update existing states
-        self.phdUpdate(observations)
+        slam_info = self.phdUpdate(observations)
         # Generate estimates
         #estimates = self.phdEstimate()
         # Prune low weight Gaussian components
@@ -62,6 +66,7 @@ class GMPHD_SLAM_FEATURE(gmphdfilter.GMPHD):
         # End of iteration call
         self.phdFlattenUpdate()
         #return estimates
+        return slam_info
 
 
 class PHDSLAM(object):
@@ -92,6 +97,8 @@ class PHDSLAM(object):
         self.weights = 1/self.parameters.state_parameters["nparticles"]* \
                         np.ones(self.parameters.state_parameters["nparticles"])
         
+        # Information for updating the state weight
+        self._slam_wt_list_ = []
         # Estimates
         self._estimate_ = PARAMETERS()
         self._estimate_.state = np.empty(0)
@@ -223,11 +230,12 @@ class PHDSLAM(object):
                 for i in range(self.parameters.state_parameters["nparticles"])]
     
     
-    def update_with_feature(self, observation_set, update_to_time):
+    def update_with_features(self, observation_set, update_to_time):
         if ((update_to_time > self.last_odo_predict_time) or 
             (update_to_time > self.last_map_predict_time)):
             self.predict(update_to_time)
         self._update_map_with_features_(observation_set)
+        self._update_state_with_features_()
     
     
     def update_with_odometry(self, odometry, update_to_time):
@@ -251,12 +259,22 @@ class PHDSLAM(object):
     
     
     def _update_state_with_features_(self):
-        # Some form of product of weights of the features
-        pass
+        # Check if the slam weight list is empty
+        if not len(self._slam_wt_list_):
+            return
+        phd_weights = np.array([self._slam_wt_list_[i].likelihood 
+            for i in range(self.parameters.state_parameters["nparticles"])])
+        # Normalise the weights
+        phd_weights *= 1/phd_weights.sum()
+        
+        self.weights *= phd_weights
+        
+        # Clear the slam weight list  - this might be unnecessary
+        self._slam_wt_list_ = []
     
     
     def _update_map_with_features_(self, observation_set):
-        [self.maps[i].phdIterate(observation_set) 
+        self._slam_wt_list_ = [self.maps[i].phdIterate(observation_set) 
                 for i in range(self.parameters.state_parameters["nparticles"])]
     
     def get_estimate(self):
