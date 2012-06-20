@@ -312,13 +312,14 @@ def daxpy(alpha, x, y=None):
         fn_return_val = y
     if DEBUG:
         assert_valid_vector(y, "y")
-        assert x.shape == y.shape, NUM_ELEM_MISMATCH+V_V_DIM_MISMATCH
+        assert (x.shape[0]==y.shape[0]) or (x.shape[0]==1), NUM_ELEM_MISMATCH
+        assert (x.shape[1]==y.shape[1]), V_V_DIM_MISMATCH
     
     if np.isscalar(alpha):
         alpha = np.array([alpha], dtype=float)
     
     if DEBUG:
-        assert len(alpha) in [1, x.shape[0]], V_V_DIM_MISMATCH
+        assert alpha.shape[0] in [1, x.shape[0]], V_V_DIM_MISMATCH
     
     exec blas_weaver("daxpy")
     return fn_return_val
@@ -1086,7 +1087,11 @@ def test_dger(num_elements=1000, dims_x=4, dims_y=2):
     print "Maximum error = ", max_err
     
 def test_dsyr(num_elements=1000, num_dims=4, num_rows=4):
-    pass
+    x = np.random.rand(num_elements, num_dims)
+    A = np.random.rand(num_elements, num_dims, num_dims)
+    dsyr('l', x, np.random.rand(1), A)
+    symmetrise(A, 'l')
+
 
 def test_dgemm(num_elements=1000, rows_A=4, cols_A=2, cols_B=6):
     alpha = np.random.rand(num_elements)

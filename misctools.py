@@ -91,6 +91,8 @@ def get_resample_index(weights, nparticles=-1):
 def mvnpdf(x, mu, sigma):
     # Compute the residuals
     residual = x.copy()
+    if residual.shape[0] == 1:
+        residual = np.repeat(residual, mu.shape[0], 0)
     blas.daxpy(-1.0, mu, residual)
     chol_sigma = blas.dpotrf(sigma)
     # Compute the determinant
@@ -109,9 +111,24 @@ def mvnpdf(x, mu, sigma):
         inv_sqrt_sigma = blas.dtrtri(chol_sigma, 'l')
         exp_term = np.power(blas.dgemv(inv_sqrt_sigma,residual), 2).sum(axis=1)
     
-    pdf = np.exp(-0.5*exp_term)/np.sqrt(det_sigma*(2*np.pi)**x.shape[1]) 
+    pdf = np.exp(-0.5*exp_term)/np.sqrt(det_sigma*(2*np.pi)**x.shape[1])
     return pdf
     
     
-def sample_mn_cv(*args, **kwargs):
-    pass
+def sample_mn_cv(x, wt=None):
+    if wt==None:
+        wt = 1.0/x.shape[0]*np.ones(x.shape[0])
+    else:
+        wt /= wt.sum()
+    
+    mean_x = x.copy()
+    # Scale the state by the associated weight
+    blas.dscal(wt, mean_x)
+    # and take the sum
+    mean_x = mean_x.sum(axis=0)
+    
+    residuals = x.copy()
+    blas.daxpy(-1.0, np.array([mean_x]), residuals)
+    cov_x = np.array([blas.dsyr('l', residuals, wt).sum(axis=0)/(1-(wt**2).sum())])
+    blas.symmetrise(cov_x, 'l')
+    return mean_x, cov_x[0]

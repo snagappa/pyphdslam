@@ -28,6 +28,7 @@ from phdfilter import PARAMETERS
 import numpy as np
 import misctools
 import blas_tools as blas
+import code
 
 #def placeholder():
 #    return (lambda:0)
@@ -88,13 +89,14 @@ class PHDSLAM(object):
                                feature_estimate_fn, feature_parameters)
         
         # Vehicle states
-        self.states = np.zeros(self.parameters.state_parameters["nparticles"], 
-                               self.parameters.state_parameters["ndims"])
+        self.states = np.zeros((self.parameters.state_parameters["nparticles"], 
+                                self.parameters.state_parameters["ndims"]),
+                                dtype=float)
         # Map of landmarks approximated by the PHD conditioned on vehicle state
         self.maps = [self.create_default_feature() 
                 for i in range(self.parameters.state_parameters["nparticles"])]
         # Particle weights
-        self.weights = 1/self.parameters.state_parameters["nparticles"]* \
+        self.weights = 1/float(self.parameters.state_parameters["nparticles"])* \
                         np.ones(self.parameters.state_parameters["nparticles"])
         
         # Information for updating the state weight
@@ -286,13 +288,18 @@ class PHDSLAM(object):
         return self._estimate_.state.copy(), self._estimate_.map.copy()
         
     def _state_estimate_(self):
-        weighted_states = self.states.copy()
-        blas.dscal(self.weights, weighted_states)
-        self._estimate_.state = weighted_states
-    
+        self._estimate_.state, self._estimate_.cov = \
+                            misctools.sample_mn_cv(self.states, self.weights)
+        return self._estimate_.state
+        
+    def _state_covariance_(self):
+        return self._estimate_.cov
+        
+        
     def _map_estimate_(self):
         max_weight_idx = np.argmax(self.weights)
         self._estimate_.map = self.maps[max_weight_idx]
+        return self._estimate_.map
     
     def resample(self):
         # Effective number of particles
@@ -310,7 +317,7 @@ class PHDSLAM(object):
         resampled_maps = [self.maps[i].copy() for i in resample_index]
         resampled_weights = (
           np.ones(self.parameters.state_parameters["nparticles"], dtype=float)*
-          1/self.parameters.state_parameters["nparticles"])
+          1/float(self.parameters.state_parameters["nparticles"]))
         
         self.weights = resampled_weights
         self.states = resampled_states

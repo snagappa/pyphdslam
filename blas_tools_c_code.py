@@ -41,7 +41,7 @@ omp_code = """
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -176,7 +176,7 @@ class ddot:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -213,7 +213,7 @@ class dnrm2:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -246,7 +246,7 @@ class dasum:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -278,7 +278,7 @@ class idamax:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -297,29 +297,31 @@ class daxpy:
     libraries = lptf77blas+lgomp
     python_vars = ["alpha", "x", "y"]
     code = """
-    int i, num_x, num_alpha;
-    int vec_len, x_offset, alpha_offset, inc;
+    int i, num_x, num_alpha, num_y;
+    int vec_len, x_offset, alpha_offset, y_offset, inc;
     int nthreads, tid;
     
     inc = 1;
     num_x = Nx[0];
-    vec_len = Nx[1];
+    x_offset = num_x==1?0:Nx[1];
     num_alpha = Nalpha[0];
     alpha_offset = !(num_alpha==1);
+    num_y = Ny[0];
+    y_offset = Ny[1];
     
     #pragma omp parallel shared(nthreads) private(i, tid)
     {
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
     #pragma omp parallel for \
-        shared(num_x, vec_len, alpha, alpha_offset, x, inc, y) private(i)
-    for (i=0; i<num_x;i++) {
-        daxpy_(&vec_len, alpha+(i*alpha_offset), x+(i*vec_len), &inc, y+(i*vec_len), &inc);
+        shared(num_y, y_offset, alpha, alpha_offset, x, x_offset, inc, y) private(i)
+    for (i=0; i<num_y;i++) {
+        daxpy_(&y_offset, alpha+(i*alpha_offset), x+(i*x_offset), &inc, y+(i*y_offset), &inc);
     }
     
     """
@@ -349,7 +351,7 @@ class dscal:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -379,7 +381,7 @@ class dcopy:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -454,7 +456,7 @@ class dgemv:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -527,7 +529,7 @@ class dgemv:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -576,7 +578,7 @@ class dtrmv:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -623,7 +625,7 @@ class dtrsv:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -675,7 +677,7 @@ class dsymv:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -731,7 +733,7 @@ class dger:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -780,7 +782,7 @@ class dsyr:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -841,7 +843,7 @@ class dgemm:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -895,7 +897,7 @@ class dsymm:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -948,7 +950,7 @@ class dsyrk:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     
@@ -1363,7 +1365,7 @@ class symmetrise:
     tid = omp_get_thread_num();
     if (tid==0) {
         nthreads = omp_get_num_threads();
-        std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
     }
     }
     

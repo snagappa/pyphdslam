@@ -29,6 +29,9 @@ import rospy
 import tf
 import PyKDL
 import math
+import code
+import copy
+import threading
 
 # Msgs imports
 from navigation_g500.msg import TeledyneExplorerDvl, ValeportSoundVelocity, \
@@ -42,9 +45,12 @@ from auv_msgs.srv import SetNE, SetNEResponse
 import numpy as np
 import girona500
 from phdfilter import PARAMETERS
+import pointclouds
 
 INVALID_ALTITUDE = -32665
+SAVITZKY_GOLAY_COEFFS = [0.2,  0.1,  0. , -0.1, -0.2]
 
+#code.interact(local=locals())
 
 def normalizeAngle(np_array):
     return (np_array + (2.0*np.pi*np.floor((np.pi - np_array)/(2.0*np.pi))))
@@ -61,12 +67,12 @@ class G500_SLAM():
         # Structure to store vehicle pose from sensors
         self.vehicle = PARAMETERS()
         # roll, pitch and yaw rates - equivalent to odom.twist.twist.angular
-        self.vehicle.twist_angular = np.zeros(0, dtype=float)
-        self.vehicle.twist_linear = np.zeros(0, dtype=float)
+        self.vehicle.twist_angular = np.zeros(3, dtype=float)
+        self.vehicle.twist_linear = np.zeros(3, dtype=float)
         # position x, y, z - the state space estimated by the filter.
-        self.vehicle.pose_position = np.zeros(0, dtype=float)
+        self.vehicle.pose_position = np.zeros(3, dtype=float)
         # orientation quaternion x,y,z,w - same as odom.pose.pose.orientation
-        self.vehicle.pose_orientation = np.zeros(0, dtype=float)
+        self.vehicle.pose_orientation = np.zeros(4, dtype=float)
         # Altitude from dvl
         self.vehicle.altitude = 0.0
         
@@ -75,6 +81,9 @@ class G500_SLAM():
         self.ros = PARAMETERS()
         self.ros.last_update_time = rospy.Time.now()
         self.init_ros()
+        self.__LOCK__ = threading.RLock()
+        # Set as true to run without gps/imu initialisation
+        self.config.init = False
         
         
     def init_slam(self):
@@ -111,7 +120,8 @@ class G500_SLAM():
         config.init_north = 0.0
         config.init_east = 0.0
         config.last_prediction = rospy.Time.now()
-        config.altitude = -1.0
+        config.altitude = INVALID_ALTITUDE
+        config.bottom_status = 0
         
         #init last sensor update
         config.init_time = rospy.Time.now()
@@ -124,6 +134,10 @@ class G500_SLAM():
         config.svs_init = False
         config.gps_init_samples_list = []
         
+        # Buffer for smoothing the yaw rate
+        config.heading_buffer = []
+        config.savitzky_golay_coeffs = SAVITZKY_GOLAY_COEFFS
+        
         # Create Subscriber
         rospy.Subscriber("/navigation_g500/teledyne_explorer_dvl", 
                          TeledyneExplorerDvl, self.updateTeledyneExplorerDvl)
@@ -134,7 +148,6 @@ class G500_SLAM():
         if config.gps_update :
             rospy.Subscriber("/navigation_g500/fastrax_it_500_gps", 
                              FastraxIt500Gps, self.updateGps)
-        
         # Subscribe to visiona slam-features node
         rospy.Subscriber("/slam_features/vision_pcl", PointCloud2, 
                          self.update_features)
@@ -159,7 +172,7 @@ class G500_SLAM():
         return EmptyResponse()
         
     def setNavigation(self, req):
-        rospy.loginfo("%s: Set Navigation to: \n%s", self.name, req)    
+        #rospy.loginfo("%s: Set Navigation to: \n%s", self.name, req) 
         self.slam_worker.states[:,0] = req.north
         self.slam_worker.states[:,1] = req.east
         ret = SetNEResponse()
@@ -177,12 +190,21 @@ class G500_SLAM():
         #rospy.loginfo("Frame: %s", str(frame))
         return frame
     
-    
     def updateGps(self, gps):
+        self.__LOCK__.acquire()
+        ret_val = None
+        try:
+            ret_val = self._update_gps_(gps)
+        finally:
+            self.__LOCK__.release()
+        return ret_val
+        
+    def _update_gps_(self, gps):
         if gps.data_quality >= 1 and gps.latitude_hemisphere >= 0 and gps.longitude_hemisphere >= 0:
             config = self.config
             config.gps_last_update = gps.header.stamp
             if not config.gps_data :
+                print "gps not set: initialising"
                 config.gps_init_samples_list.append([gps.north, gps.east])
                 if len(config.gps_init_samples_list) >= config.gps_init_samples:
                     config.gps_data = True
@@ -198,15 +220,26 @@ class G500_SLAM():
                 
                 #Right now the GPS is only used to initialize the navigation not for updating it!!!
                 if distance < 0.1:
+                    #print "Update GPS:"
                     if self.makePrediction(config.gps_last_update):
                         #z = array([gps.north, gps.east])
                         self.setNavigation(gps)
                         self.ros.last_update_time = config.gps_last_update
                         self.publish_data()
+                else:
+                    print "distance too large, not updating"
                         
         
-        
     def updateTeledyneExplorerDvl(self, dvl):
+        self.__LOCK__.acquire()
+        ret_val = None
+        try:
+            ret_val = self._update_teledyne_explorer_dvl_(dvl)
+        finally:
+            self.__LOCK__.release()
+        return ret_val
+            
+    def _update_teledyne_explorer_dvl_(self, dvl):
         config = self.config
         config.dvl_last_update = dvl.header.stamp
         config.dvl_init = True
@@ -251,7 +284,7 @@ class G500_SLAM():
             angular_velocity = self.vehicle.twist_angular
             distance = config.dvl_tf_data[0:3]
             self.vehicle.twist_linear -= np.cross(angular_velocity, distance)
-            
+            #print "Update dvl:"
             self.makePrediction(config.dvl_last_update)
             #dvl_reference = "bottom" if dvl_update == 1 else "water"
             likelihood_params = \
@@ -268,6 +301,15 @@ class G500_SLAM():
         
     
     def updateValeportSoundVelocity(self, svs):
+        self.__LOCK__.acquire()
+        ret_val = None
+        try:
+            ret_val = self._update_valeport_sound_velocity_(svs)
+        finally:
+            self.__LOCK__.release()
+        return ret_val
+            
+    def _update_valeport_sound_velocity_(self, svs):
         config = self.config
         config.svs_last_update = rospy.Time.now()
         config.svs_init = True
@@ -283,10 +325,11 @@ class G500_SLAM():
         self.makePrediction(config.dvl_last_update)
         self.slam_worker.update_svs(self.vehicle.pose_position[2])
         self.ros.last_update_time = config.svs_last_update
-        self.publish_data()
+        #self.publish_data()
 
-
+    
     def updateImu(self, imu):
+        ret_val = None
         config = self.config
         config.imu_init = True
         
@@ -299,7 +342,16 @@ class G500_SLAM():
         if not config.imu_data :
             config.last_imu_orientation = pose_angle
             config.imu_last_update = imu.header.stamp
-            config.imu_data = True
+            #config.imu_data = True
+            # Initialize heading buffer in order to apply a savitzky_golay derivation
+            if len(config.heading_buffer) == 0:
+                config.heading_buffer.append(pose_angle[2])
+                
+            inc = normalizeAngle(pose_angle[2] - config.heading_buffer[-1])
+            config.heading_buffer.append(config.heading_buffer[-1] + inc)
+            
+            if len(config.heading_buffer) == len(config.savitzky_golay_coeffs):
+                config.imu_data = True
             
         else:
             pose_angle_quaternion = tf.transformations.quaternion_from_euler(
@@ -308,59 +360,99 @@ class G500_SLAM():
             
             # Derive angular velocities from orientations #####################
             period = (imu.header.stamp - config.imu_last_update).to_sec()
-            
             self.vehicle.twist_angular = normalizeAngle(
-                                pose_angle-config.last_imu_orientation)/period
+             np.array(pose_angle)-np.array(config.last_imu_orientation))/period
+            
+            # For yaw rate we apply a savitzky_golay derivation
+            inc = normalizeAngle(pose_angle[2] - config.heading_buffer[-1])
+            config.heading_buffer.append(config.heading_buffer[-1] + inc)
+            config.heading_buffer.pop(0)
+            self.vehicle.twist_angular[2] = np.convolve(config.heading_buffer, 
+                                                        config.savitzky_golay_coeffs, 
+                                                        mode='valid') / period
             
             config.last_imu_orientation = pose_angle
-            config.imu_last_update = imu.header.stamp          
+            config.imu_last_update = imu.header.stamp
             ###################################################################
+            self.__LOCK__.acquire()
+            try:
+                ret_val = self._update_imu_(imu)
+            finally:
+                self.__LOCK__.release()
+        return ret_val
             
+    def _update_imu_(self, imu):
+        config = self.config
+        #print "Update imu:"
+        if self.ros.last_update_time < config.imu_last_update:
             self.makePrediction(config.imu_last_update)
             self.ros.last_update_time = config.imu_last_update
             self.publish_data()
 
+    
+    def update_features(self, pcl_msg):
+        # Convert the pointcloud slam features into normal x,y,z
+        # The pointcloud may have uncertainty on the points - this will be
+        # the observation noise
+        slam_features = pointclouds.pointcloud2_to_xyz_array(pcl_msg)
         
+        # We can now access the points as slam_features.[{'x','y','z'}]
+        self.slam_worker.update_with_features(slam_features, 
+                                              pcl_msg.header.stamp)
+    
+    
     def makePrediction(self, predict_to_time):
+        # Spin until the lock is free
+        #while self.__LOCK__:
+        #    pass
+        # Grab the lock
+        #self.__LOCK__ = 1
         config = self.config
         if not config.init:
-            if config.imu_data and config.gps_data:
-                #time_now = rospy.Time.now()
-                time_now = predict_to_time
-                config.last_prediction = time_now
-                self.slam_worker.last_odo_predict_time = time_now.to_sec()
+            time_now = predict_to_time
+            config.last_prediction = time_now
+            self.slam_worker.last_odo_predict_time = time_now.to_sec()
+            if config.imu_data and config.gps_data:                
                 # Initialise slam worker with north and east co-ordinates
                 init = lambda:0
                 init.north = config.init_north
                 init.east = config.init_east
                 self.slam_worker.reset_states()
+                print "Resetting states to ", str(init.north), ", ", str(init.east)
                 self.setNavigation(init)
                 config.init = True
+            #self.__LOCK__ = 0
             return False
         else:
+            #print "makePrediction()"
             pose_angle = tf.transformations.euler_from_quaternion(
-                                                *self.vehicle.pose_orientation)
+                                                self.vehicle.pose_orientation)
             #time_now = rospy.Time.now()
+            if predict_to_time < config.last_prediction:
+                return True
             time_now = predict_to_time
             config.last_prediction = time_now
             time_now = time_now.to_sec()
             self.slam_worker.predict_state(pose_angle, time_now)
+            #self.__LOCK__ = 0
+            #code.interact(local=locals())
             return True
             
-        
+    
     def publish_data(self):
-        if self.init:
+        if self.config.init:
             nav_msg = self.ros.nav_msg
             est_state = self.slam_worker._state_estimate_()
+            est_cov = self.slam_worker._state_covariance_()
             angle = tf.transformations.euler_from_quaternion(
                                                 self.vehicle.pose_orientation)            
             
             # Create header
             nav_msg.header.stamp = self.ros.last_update_time
             nav_msg.header.frame_id = "g500slam"
-            nav_msg.child_frame_id = "world"
+            child_frame_id = "world"
                        
-            #Fil Nav status topic
+            #Fill Nav status topic
             nav_msg.position.north = est_state[0]
             nav_msg.position.east = est_state[1]
             nav_msg.position.depth = est_state[2]
@@ -375,6 +467,10 @@ class G500_SLAM():
             nav_msg.orientation_rate.yaw = self.vehicle.twist_angular[2]
             nav_msg.altitude = self.vehicle.altitude
             
+            # Variance
+            nav_msg.position_variance.north = est_cov[0,0]
+            nav_msg.position_variance.east = est_cov[1,1]
+            nav_msg.position_variance.depth = est_cov[2,2]
             #Publish topics
             self.ros.nav_sts_publisher.publish(nav_msg)
             
@@ -386,11 +482,11 @@ class G500_SLAM():
                     nav_msg.position.depth),
                 tf.transformations.quaternion_from_euler(
                     nav_msg.orientation.roll, 
-                    self.nav.orientation.pitch, 
-                    self.nav.orientation.yaw),
+                    nav_msg.orientation.pitch, 
+                    nav_msg.orientation.yaw),
                 nav_msg.header.stamp, 
                 nav_msg.header.frame_id, 
-                nav_msg.child_frame_id)
+                child_frame_id)
         else :
             self.ros.last_update_time = rospy.Time.now()
             self.init = True

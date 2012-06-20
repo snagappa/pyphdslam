@@ -123,6 +123,7 @@ class GMPHD(PHD):
     def __init__(self, *args, **kwargs):
         self.states = GMSTATES(0)
         self._states_ = GMSTATES(0)
+        self.parameters = PARAMETERS()
         if len(args) or len(kwargs):
             self.init(*args, **kwargs)
             
@@ -173,7 +174,7 @@ class GMPHD(PHD):
         P = detected_states.covariance
         
         # Part of the Kalman update is common to all observation-updates
-        x, P, kalman_info = blas_KF_update(x, P, 
+        x, P, kalman_info = blas_kf_update(x, P, 
                             np.array([self.parameters.obs_fn.parameters.H]), 
                             np.array([self.parameters.obs_fn.parameters.R]), 
                             None, INPLACE=True)#USE_NP=0)
@@ -188,7 +189,7 @@ class GMPHD(PHD):
             #new_x = copy.deepcopy(x)
             # Apply the Kalman update to get the new state - update in-place
             # and return the residuals
-            new_x, residuals = blas_KF_update_x(x, kalman_info.pred_z, 
+            new_x, residuals = blas_kf_update_x(x, kalman_info.pred_z, 
                                         _observation_, kalman_info.kalman_gain,
                                         INPLACE=False)
             
@@ -318,7 +319,7 @@ class GMPHD(PHD):
     
     
 ##############################################################################
-def blas_KF_predict(state, covariance, F, Q, B=None, u=None):
+def blas_kf_predict(state, covariance, F, Q, B=None, u=None):
     pred_state = blas.dgemv(F, state)
     if (not B==None) and (not u==None):
         blas.dgemv(B, u, y=pred_state)
@@ -328,7 +329,7 @@ def blas_KF_predict(state, covariance, F, Q, B=None, u=None):
     return pred_state, Q
     
 
-def blas_KF_update(state, covariance, H, R, z=None, INPLACE=True):
+def blas_kf_update(state, covariance, H, R, z=None, INPLACE=True):
     kalman_info = lambda:0
     assert z == None or len(z.shape) == 1, "z must be a single observations, \
     not an array of observations"
@@ -368,10 +369,11 @@ def blas_KF_update(state, covariance, H, R, z=None, INPLACE=True):
     # Observation from current state
     pred_z = blas.dgemv(H, state)
     if not (z==None):
-        residuals = np.repeat(z, pred_z.shape[0], 0)
-        blas.daxpy(-1, pred_z, residuals)
-        # Update the state
-        upd_state = blas.dgemv(kalman_gain, residuals, y=upd_state)
+        upd_state, residuals = blas_kf_update_x(upd_state, pred_z, z, kalman_gain, INPLACE=True)
+        #residuals = np.repeat(z, pred_z.shape[0], 0)
+        #blas.daxpy(-1, pred_z, residuals)
+        ## Update the state
+        #blas.dgemv(kalman_gain, residuals, y=upd_state)
     else:
         residuals = np.empty(0)
     
@@ -388,7 +390,7 @@ def blas_KF_update(state, covariance, H, R, z=None, INPLACE=True):
     return upd_state, upd_covariance, kalman_info
     
     
-def blas_KF_update_x(x, pred_z, z, kalman_gain, INPLACE=True):
+def blas_kf_update_x(x, pred_z, z, kalman_gain, INPLACE=True):
     assert z == None or len(z.shape) == 1, "z must be a single observations, \
     not an array of observations"
     if INPLACE:
@@ -396,10 +398,10 @@ def blas_KF_update_x(x, pred_z, z, kalman_gain, INPLACE=True):
     else:
         upd_state = x
     
-    residuals = np.repeat(z, pred_z.shape[0], 0)
+    residuals = np.repeat([z], pred_z.shape[0], 0)
     blas.daxpy(-1, pred_z, residuals)
     # Update the state
-    upd_state = blas.dgemv(kalman_gain, residuals, y=upd_state)
+    blas.dgemv(kalman_gain, residuals, y=upd_state)
     
     return upd_state, residuals
     
