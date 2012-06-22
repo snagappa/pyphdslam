@@ -314,12 +314,12 @@ class PHDSLAM(object):
         resample_index = misctools.get_resample_index(self.weights)
         # self.states is a numpy array so the indexing operation forces a copy
         resampled_states = self.states[resample_index]
-        resampled_maps = [self.maps[i].copy() for i in resample_index]
+        #resampled_maps = [self.maps[i].copy() for i in resample_index]
         resampled_weights = (
           np.ones(self.parameters.state_parameters["nparticles"], dtype=float)*
           1/float(self.parameters.state_parameters["nparticles"]))
         
         self.weights = resampled_weights
         self.states = resampled_states
-        self.maps = resampled_maps
+        #self.maps = resampled_maps
     

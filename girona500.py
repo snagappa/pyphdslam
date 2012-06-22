@@ -38,6 +38,7 @@ import blas_tools as blas
 import rospy
 import code
 
+import ukf
 from gmphdfilter import blas_kf_update
 
 SLAM_FN_DEFS = collections.namedtuple("SLAM_FN_DEFS", 
@@ -126,14 +127,14 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         
     
     def update_gps(self, gps_obs):
-        pred_gps_obs = self.states[:, 0:2]
+        pred_gps_obs = np.array(self.states[:, 0:2])
         likelihood = misctools.mvnpdf(np.array([gps_obs]), pred_gps_obs, 
                 np.array([self.parameters.state_likelihood_fn.parameters.gps_obs_noise]))
         self.weights *= likelihood
         self.weights /= self.weights.sum()
     
     def update_dvl(self, dvl_obs):
-        USE_KF = True
+        USE_KF = False
         if USE_KF:
             obs_matrix = np.array([np.hstack(( np.zeros((3,3)), np.eye(3) ))])
             obs_noise = np.array([self.parameters.state_likelihood_fn.parameters.dvl_obs_noise])
@@ -147,7 +148,6 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
             pred_dvl_obs = np.array(self.states[:, 3:])
             npa_dvl_obs = np.array([dvl_obs])
             cov = np.array([self.parameters.state_likelihood_fn.parameters.dvl_obs_noise])
-            print "update dvl:"
             loglikelihood = np.log(misctools.mvnpdf(npa_dvl_obs, pred_dvl_obs, cov) +
                                 np.finfo(np.double).tiny)
             loglikelihood -= max(loglikelihood)
@@ -174,46 +174,38 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
     
 #state_markov_predict_fn
 def g500_state_predict(states, covs, ctrl_input, delta_t, parameters):
-    #pred_states, sc_process_noise = _state_predict_(states, ctrl_input, delta_t, parameters)
-    #awg_noise = np.random.multivariate_normal(mean=np.zeros(6, dtype=float),
-    #                                          cov=sc_process_noise, 
-    #                                          size=(states.shape[0]))
-    pred_states = np.empty(states.shape)
-    pred_covs = np.empty(covs.shape)
-    for count in range(states.shape[0]):
-        this_pred_state, this_pred_cov = g500_ukf_prediction(states[count], 
-                                                             covs[count], 
-                                            ctrl_input, delta_t, parameters)
-        pred_states[count] = this_pred_state
-        pred_covs[count] = this_pred_cov
-        
-    # print "prediction:"
-    #pred_states += awg_noise
+    PREDICTION = "particles"
+    trans_mat, sc_process_noise = trans_matrices(ctrl_input, delta_t, parameters)
+    if PREDICTION=="ekf":
+        # EKF prediction
+        pred_states = _state_predict_(states, ctrl_input, delta_t, parameters, trans_mat)
+        pred_covs = blas.dgemm(trans_mat, 
+                               blas.dgemm(covs, trans_mat, TRANSPOSE_B=True, 
+                                          beta=0.0), beta=0.0)
+    elif PREDICTION=="ukf":
+        # UKF prediction
+        pred_states = np.empty(states.shape)
+        pred_covs = np.empty(covs.shape)
+        for count in range(states.shape[0]):
+            #this_pred_state, this_pred_cov = ukf.ukf_predict(states[count], 
+            #                                                 covs[count], 
+            #                ctrl_input, sc_process_noise, _state_predict_, delta_t, parameters)
+            this_pred_state, this_pred_cov = g500_ukf_prediction(states[count], 
+                                                                 covs[count], 
+                                                ctrl_input, delta_t, parameters)
+            pred_states[count] = this_pred_state
+            pred_covs[count] = this_pred_cov
+    elif PREDICTION=="particles":
+        pred_covs = np.zeros(covs.shape)
+        pred_states = _state_predict_(states, ctrl_input, delta_t, parameters, trans_mat)
+        awg_noise = np.random.multivariate_normal(mean=np.zeros(6, dtype=float),
+                                                  cov=sc_process_noise, 
+                                                  size=(states.shape[0]))
+        pred_states += awg_noise
     return pred_states, pred_covs
     
-def g500_ukf_prediction(x, P, ctrl_input, delta_t, parameters, _alpha=1.0, _beta=1.0, _kappa=0.1):
-    #_L = x.shape[0]
-    # UKF parameters
-    #_lambda = _alpha**2 * (_L+_kappa) - _L
-    #_gamma = (_L + _lambda)**0.5
-    
-    # UKF prediction
-    # Create the Sigma points
-    (x_sigma, x_weight, P_weight) = createSigmaPoints(x, P, _alpha, _beta, _kappa)
-    
-    # Predict Sigma points and multiply by weight
-    x_sigma_predicted, sc_process_noise = _state_predict_(x_sigma, ctrl_input, 
-                                                          delta_t, parameters)
-    blas.dscal(x_weight, x_sigma_predicted)
-    
-    # Take the weighted mean of the Sigma points to get the predicted mean
-    pred_state = np.add.reduce(x_sigma_predicted)
-    
-    # Generate the weighted Sigma covariance and add Q to get predicted cov
-    pred_cov = evalSigmaCovariance(P_weight, x_sigma_predicted, pred_state) + sc_process_noise
-    return pred_state, pred_cov
-    
-def _state_predict_(states, ctrl_input, delta_t, parameters):
+
+def trans_matrices(ctrl_input, delta_t, parameters):
     # u is assumed to be ordered as [roll, pitch, yaw]
     r, p, y = 0, 1, 2
     # Evaluate cosine and sine of roll, pitch, yaw
@@ -229,18 +221,22 @@ def _state_predict_(states, ctrl_input, delta_t, parameters):
     # Transition matrix
     trans_mat = np.array([ np.vstack(( np.hstack((np.eye(3), rot_mat)),
                                np.hstack((np.zeros((3,3)), np.eye(3))) )) ])
-    # Multiply the transition matrix with each state
-    pred_states = blas.dgemv(trans_mat, states)
-    
     ## Add white Gaussian noise to the predicted states
     # Compute scaling for the noise
-    scale_matrix = np.array([np.vstack((rot_mat*delta_t/2, np.eye(3)))])
+    scale_matrix = np.array([np.vstack((rot_mat*delta_t/2, delta_t*np.eye(3)))])
     process_noise = np.array([parameters.process_noise])
     # Compute the process noise as scale_matrix*process_noise*scale_matrix'
     sc_process_noise = blas.dgemm(scale_matrix, 
                    blas.dgemm(process_noise, scale_matrix, 
                               TRANSPOSE_B=True, beta=0.0), beta=0.0)[0]
-    return pred_states, sc_process_noise
+    return trans_mat, sc_process_noise
+    
+def _state_predict_(states, ctrl_input, delta_t, parameters, trans_mat=None):
+    if trans_mat==None:
+        trans_mat, sc_process_noise = trans_matrices(ctrl_input, delta_t, parameters)
+    # Multiply the transition matrix with each state
+    pred_states = blas.dgemv(trans_mat, states)
+    return pred_states
 
 
 def g500_kf_update(weights, states, covs, obs_matrix, obs_noise, z):
@@ -299,7 +295,7 @@ def g500_slam_fn_defs():
     # that the information from the imu is perfect
     # We only need to estimate x,y,z. The roll, pitch and yaw must be fed
     # externally
-    state_parameters = {"nparticles":10,
+    state_parameters = {"nparticles":50,
                         "ndims":6,
                         "resample_threshold":0.9}
     
@@ -419,20 +415,40 @@ def get_config():
     
     
 
+def g500_ukf_prediction(x, P, ctrl_input, delta_t, parameters, _alpha=1e-3, _beta=2, _kappa=0):
+    #_L = x.shape[0]
+    # UKF parameters
+    #_lambda = _alpha**2 * (_L+_kappa) - _L
+    #_gamma = (_L + _lambda)**0.5
+    
+    trans_mat, sc_process_noise = trans_matrices(ctrl_input, delta_t, parameters)
+    P += sc_process_noise #+ 1e-1*np.eye(P.shape[0])
+    
+    # UKF prediction
+    # Create the Sigma points
+    (x_sigma, x_weight, P_weight) = createSigmaPoints(x, P, _alpha, _beta, _kappa)
+    
+    # Predict Sigma points and multiply by weight
+    x_sigma_predicted = _state_predict_(x_sigma, ctrl_input, delta_t, 
+                                        parameters, trans_mat)
+    blas.dscal(x_weight, x_sigma_predicted)
+    
+    # Take the weighted mean of the Sigma points to get the predicted mean
+    pred_state = np.add.reduce(x_sigma_predicted)
+    
+    # Generate the weighted Sigma covariance and add Q to get predicted cov
+    pred_cov = evalSigmaCovariance(P_weight, x_sigma_predicted, pred_state) #+ sc_process_noise
+    return pred_state, pred_cov
 
     
 def createSigmaPoints(x, P, _alpha, _beta, _kappa):
     _L = x.shape[0]
     # UKF parameters
     _lambda = _alpha**2 * (_L+_kappa) - _L
-    #_gamma = (_L + _lambda)**0.5
+    _gamma = (_L + _lambda)**0.5
     # Square root of scaled covariance matrix
-    try:
-        #sqrt_cov = np.tril(blas.dpotrf(np.array([P]))[0])
-        sqrt_cov = np.linalg.cholesky(P)
-    except:
-        print "Cholesky decomposition failed!"
-        code.interact(local=locals())
+    #sqrt_cov = _gamma*np.tril(blas.dpotrf(np.array([P]))[0])
+    sqrt_cov = _gamma*np.linalg.cholesky(P)
     
     # Array of the sigma points
     x_plus = np.array([x+sqrt_cov[:,count] for count in range(_L)])

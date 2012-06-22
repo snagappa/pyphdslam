@@ -222,10 +222,12 @@ class G500_SLAM():
                 if distance < 0.1:
                     #print "Update GPS:"
                     if self.makePrediction(config.gps_last_update):
-                        #z = array([gps.north, gps.east])
-                        self.setNavigation(gps)
+                        z = np.array([gps.north, gps.east])
+                        self.slam_worker.update_gps(z)
+                        #self.setNavigation(gps)
                         self.ros.last_update_time = config.gps_last_update
                         self.publish_data()
+                        self.slam_worker.resample()
                 else:
                     print "distance too large, not updating"
                         
@@ -296,6 +298,7 @@ class G500_SLAM():
             self.slam_worker.update_dvl(self.vehicle.twist_linear)
             self.ros.last_update_time = config.dvl_last_update
             self.publish_data()
+            self.slam_worker.resample()
         else:
             rospy.loginfo('%s, invalid DVL velocity measurement!', self.name)
         
@@ -382,11 +385,11 @@ class G500_SLAM():
         return ret_val
             
     def _update_imu_(self, imu):
-        config = self.config
+        #config = self.config
         #print "Update imu:"
-        if self.ros.last_update_time < config.imu_last_update:
-            self.makePrediction(config.imu_last_update)
-            self.ros.last_update_time = config.imu_last_update
+        if self.ros.last_update_time < imu.header.stamp:
+            self.makePrediction(imu.header.stamp)
+            self.ros.last_update_time = imu.header.stamp
             self.publish_data()
 
     

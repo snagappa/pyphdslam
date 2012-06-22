@@ -543,7 +543,8 @@ def dgemm(A, B, TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, beta=1.0, C=Non
     if DEBUG:
         assert_valid_matrix(A, "A")
         assert_valid_matrix(B, "B")
-        assert A.shape[0] in [1, B.shape[0]] and B.shape[0] in [1, A.shape[0]], NUM_ELEM_MISMATCH
+        assert A.shape[0] == B.shape[0] or A.shape[0]==1 or B.shape[0] == 1, NUM_ELEM_MISMATCH
+        #assert A.shape[0] in [1, B.shape[0]] and B.shape[0] in [1, A.shape[0]], NUM_ELEM_MISMATCH
     
     A_dims = list(A.shape[1:])
     B_dims = list(B.shape[1:])

@@ -73,7 +73,7 @@ def get_resample_index(weights, nparticles=-1):
     double uj, d_u1;
 
     wt_cdf[0] = weights[0];
-    for (j=1; j<len_weights; j++)
+    for (j=1; j<Nweights[0]; j++)
         wt_cdf[j] = wt_cdf[j-1] + weights[j];
     
     for (j=0; j<nparticles; j++) {
