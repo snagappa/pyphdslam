@@ -11,8 +11,16 @@ import numpy as np
 import copy
 import scipy.interpolate
 
+import roslib
+roslib.load_manifest("g500slam")
+from nav_msgs.msg import Odometry
+import rospy
+import tf
 
-class SLAM_POINTS(object):
+
+class STRUCT(object): pass
+
+class SLAM_MAP(object):
     def __init__(self):
         # List of landmarks
         self._landmarks_ = []
@@ -87,40 +95,8 @@ class SLAM_POINTS(object):
         Scene._landmarks_ = copy.deepcopy(self._landmarks_)
         Scene._waypoints_ = copy.deepcopy(self._waypoints_)
         
-        
-class STRUCT(object): pass
-class SCENARIO(object):
-    def __init__(self):
-        self.vehicle = STRUCT()
-        self.landmarks = STRUCT()
-        
-    def visible_landmarks(self, x, y, orientation, width=1, length=1):
-        delta_x = width/2*np.cos(np.pi/2-orientation)
-        delta_y = width/2*np.sin(np.pi/2-orientation)
-        extra_x = length*np.cos(orientation)
-        extra_y = length*np.sin(orientation)
-        vertices = np.array([[x+delta_x, y-delta_y], 
-                             [x-delta_x, y+delta_y],
-                             [x+extra_x-delta_x, y+extra_y+delta_y],
-                             [x+extra_x+delta_x, y+extra_y-delta_y]])
-        landmarks_mask = nxutils.points_inside_poly(self.landmarks, vertices)
-        return landmarks_mask
-        
-    def make_observations(self, width=1, length=1):
-        mask = []
-        observations = []
-        for i in range(self.vehicle.orientation.shape[0]):
-            this_mask = self.visible_landmarks(self.vehicle.path[i,0], 
-                                               self.vehicle.path[i,1],
-                                               self.vehicle.orientation[i],
-                                               width, length)
-            this_obs = self.landmarks[this_mask]
-            mask.append(this_mask)
-            observations.append(this_obs)
-        return observations
-        
 
-class SLAM_SCENE(SLAM_POINTS):
+class SLAM_MAP_BUILDER(SLAM_MAP):
     def __init__(self):
         self.fig = mpl.pyplot.figure()
         self.ax = self.fig.add_subplot(111)
@@ -128,7 +104,7 @@ class SLAM_SCENE(SLAM_POINTS):
         self.points_collection = self.ax.scatter(np.empty(0), np.empty(0))
         self._cid_ = self.points_collection.figure.canvas.mpl_connect(
                                         'button_press_event', self.addpoint)
-        super(SLAM_SCENE, self).__init__()
+        super(SLAM_MAP_BUILDER, self).__init__()
         self.xlim = [-10, 10]
         self.ylim = [-10, 10]
         
@@ -173,7 +149,7 @@ class SLAM_SCENE(SLAM_POINTS):
         
     def addpoint(self, event):
         if event.inaxes != self.points_collection.axes: return
-        super(SLAM_SCENE, self).addpoint(event)
+        super(SLAM_MAP_BUILDER, self).addpoint(event)
         
     def draw(self, *args, **kwargs):
         self.fig.sca(self.ax)
@@ -195,72 +171,98 @@ class SLAM_SCENE(SLAM_POINTS):
                 mpl.pyplot.plot(wp_spline[:,0], wp_spline[:,1])
         self.points_collection.figure.canvas.draw()
         
-    def scenario(self):
-        slam_scenario = SCENARIO()
-        slam_scenario.vehicle = STRUCT()
-        slam_scenario.vehicle.path = self.splinepath()
-        path_delta = np.diff(slam_scenario.vehicle.path, 1, 0)
-        orientation = [np.math.atan2(path_delta[i,1], path_delta[i,0]) 
-                                        for i in range(path_delta.shape[0])]
-        orientation.append(orientation[-1])
-        slam_scenario.vehicle.orientation = np.array(orientation)
-        slam_scenario.landmarks = self.landmarks()
-        return slam_scenario
 
 
-Scene = SLAM_POINTS()
-
-
-def visible_landmarks(xy, orientation, width=1, length=1):
-    x, y = xy[0], xy[1]
-    delta_x = width/2*np.cos(np.pi/2-orientation)
-    delta_y = width/2*np.sin(np.pi/2-orientation)
-    extra_x = length*np.cos(orientation)
-    extra_y = length*np.sin(orientation)
-    vertices = np.array([[x+delta_x, y-delta_y], 
-                         [x-delta_x, y+delta_y],
-                         [x+extra_x-delta_x, y+extra_y+delta_y],
-                         [x+extra_x+delta_x, y+extra_y-delta_y]])
-    mpl.pyplot.plot(vertices[:,0], vertices[:,1])
-    return vertices
-
-"""
-#def simulator():
-pyplot = mpl.pyplot
-Button = mpl.widgets.Button
-sim_fig = pyplot.figure()
-ax = sim_fig.add_subplot(111)
-sim_fig.subplots_adjust(bottom=0.2)
-# Select points from the graph
-scatter_plot = ax.scatter(np.empty(0), np.empty(0))
-callback = SLAM_SCENE(scatter_plot)
-ax.set_title('click to create landmarks and set waypoints')
-pyplot.xlim([-1, 1])
-pyplot.ylim([-1, 1])
-
-# Undo button
-axundo = pyplot.axes([0.7, 0.05, 0.1, 0.075])
-b_undo = Button(axundo, 'Undo')
-b_undo.on_clicked(callback.undo)
-
-# Redo button
-axredo = pyplot.axes([0.81, 0.05, 0.1, 0.075])
-b_redo = Button(axredo, 'Redo')
-b_redo.on_clicked(callback.redo)
-
-# Save button
-axsave = pyplot.axes([0.51, 0.05, 0.1, 0.075])
-b_save = Button(axsave, 'Save')
-b_save.on_clicked(callback.save_scene)
-
-# Radio buttons
-axcolor = 'lightgoldenrodyellow'
-rax = pyplot.axes([0.1, 0.025, 0.2, 0.1], axisbg=axcolor)
-radio = mpl.widgets.RadioButtons(rax, ('landmarks', 'waypoints'))
-radio.on_clicked(callback.setmode)
-callback.setmode("landmarks")
-
-cursor = mpl.widgets.Cursor(ax, useblit=True, color='red', linewidth=2 )
-
-pyplot.show()
-"""
+class SLAM_SIMULATOR(object):
+    def __init__(self, name="slam_sim"):
+        self.name = name
+        self.map_builder = SLAM_MAP_BUILDER()
+        self.vehicle = STRUCT()
+        self.vehicle.position = None
+        self.vehicle.orientation = None
+        self.viewer = self.init_viewer()
+        self.init_ros(name)
+        self.last_update = rospy.Time.now()
+        mpl.pyplot.show()
+        
+    def init_ros(self, name):
+        rospy.init_node(name)
+        # Create Subscriber
+        rospy.Subscriber("/uwsim/girona500_odom", Odometry, self.callback)
+        
+    def init_viewer(self):
+        viewer = STRUCT()
+        viewer.fig = mpl.pyplot.figure()
+        viewer.ax = viewer.fig.add_subplot(111)
+        viewer.xlim = [-10, 10]
+        viewer.ylim = [-10, 10]
+        return viewer
+    
+    def callback(self, odom):
+        # received a new position, update the viewer
+        position = np.array([odom.pose.pose.position.x,
+                             odom.pose.pose.position.y,
+                             odom.pose.pose.position.z])
+        self.vehicle.position = position
+        
+        euler_from_quaternion = tf.transformations.euler_from_quaternion
+        orientation = euler_from_quaternion([odom.pose.pose.orientation.x,
+                                             odom.pose.pose.orientation.y,
+                                             odom.pose.pose.orientation.z,
+                                             odom.pose.pose.orientation.w])
+        self.vehicle.orientation = orientation
+        self.draw()
+        
+    def visible_landmarks(self, width=2.0, length=1.0):
+        x = self.vehicle.position[1]
+        y = self.vehicle.position[0]
+        orientation = self.vehicle.orientation[2]
+        
+        delta_x = width/2*np.cos(np.pi-(np.pi/2-orientation)-np.pi/2)
+        delta_y = width/2*np.sin(np.pi-(np.pi/2-orientation)-np.pi/2)
+        extra_x = length*np.cos(np.pi-orientation-np.pi/2)
+        extra_y = length*np.sin(np.pi-orientation-np.pi/2)
+        """
+        vertices = np.array([[x-width/2, y],
+                             [x-width/2, y+length/2],
+                             [x+width/2, y+length/2],
+                             [x+width/2, y]])
+        """
+        vertices = np.array([[x+delta_x, y-delta_y], 
+                             [x-delta_x, y+delta_y],
+                             [x+extra_x-delta_x, y+extra_y+delta_y],
+                             [x+extra_x+delta_x, y+extra_y-delta_y]])
+        
+        landmarks = self.map_builder.landmarks()
+        if landmarks.shape[0]:
+            landmarks_mask = nxutils.points_inside_poly(landmarks, vertices)
+            vis_landmarks = landmarks[landmarks_mask]
+        else:
+            vis_landmarks = np.empty(0)
+        return vis_landmarks, vertices
+        
+    def draw(self):
+        viewer = self.viewer
+        viewer.ax.clear()
+        viewer.ax.cla()
+        viewer.ax.set_title("Vehicle position")
+        viewer.ax.set_xlim(self.viewer.xlim)
+        viewer.ax.set_ylim(self.viewer.ylim)
+        yaw = self.vehicle.orientation[2]
+        position = self.vehicle.position
+        viewer.ax.arrow(position[1], position[0], 
+                        0.5*np.sin(yaw), 0.5*np.cos(yaw), width=0.15,
+                        length_includes_head=True)
+        
+        points = self.map_builder.landmarks()
+        if points.shape[0]:
+            viewer.ax.scatter(points[:,0], points[:,1], c='r')
+        landmarks, vertices = self.visible_landmarks()
+        
+        #mpl.patches.Polygon(vertices)
+        vertices = np.vstack((vertices, vertices[0]))
+        viewer.ax.plot(vertices[:,0], vertices[:,1])
+        if landmarks.shape[0]:
+            viewer.ax.scatter(landmarks[:,0], landmarks[:,1])
+        viewer.fig.canvas.draw()
+    

@@ -121,6 +121,7 @@ class GMPHD(PHD):
     a Gaussian mixture.
     """
     def __init__(self, *args, **kwargs):
+        super(GMPHD, self).__init__(*args, **kwargs)
         self.states = GMSTATES(0)
         self._states_ = GMSTATES(0)
         self.parameters = PARAMETERS()

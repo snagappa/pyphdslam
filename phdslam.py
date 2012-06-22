@@ -35,18 +35,9 @@ import code
 
 
 class GMPHD_SLAM_FEATURE(gmphdfilter.GMPHD):
-    def __init__(self, markov_predict_fn, obs_fn, likelihood_fn,
-                 state_update_fn, clutter_fn, birth_fn, ps_fn, pd_fn,
-                 estimate_fn,
-                 phd_parameters={"max_terms":100,
-                                 "elim_threshold":1e-4,
-                                 "merge_threshold":4}):
-        super(GMPHD_SLAM_FEATURE, self).__init__(
-                                    markov_predict_fn, obs_fn, likelihood_fn,
-                                    state_update_fn, clutter_fn, birth_fn,
-                                    ps_fn, pd_fn, estimate_fn, phd_parameters)
-        
-        
+    def __init__(self, *args, **kwargs):
+        super(GMPHD_SLAM_FEATURE, self).__init__(*args, **kwargs)
+    
     def phdIterate(self, observations):
         """
         Performs a single iteration of the PHD filter except for the 
@@ -314,12 +305,12 @@ class PHDSLAM(object):
         resample_index = misctools.get_resample_index(self.weights)
         # self.states is a numpy array so the indexing operation forces a copy
         resampled_states = self.states[resample_index]
-        #resampled_maps = [self.maps[i].copy() for i in resample_index]
+        resampled_maps = [self.maps[i].copy() for i in resample_index]
         resampled_weights = (
           np.ones(self.parameters.state_parameters["nparticles"], dtype=float)*
           1/float(self.parameters.state_parameters["nparticles"]))
         
         self.weights = resampled_weights
         self.states = resampled_states
-        #self.maps = resampled_maps
+        self.maps = resampled_maps
     

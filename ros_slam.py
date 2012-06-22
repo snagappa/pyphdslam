@@ -40,7 +40,7 @@ from sensor_msgs.msg import Imu
 from sensor_msgs.msg import PointCloud2
 from auv_msgs.msg import NavSts
 from std_srvs.srv import Empty, EmptyResponse
-from auv_msgs.srv import SetNE, SetNEResponse
+from navigation_g500.srv import SetNE, SetNEResponse #, SetNERequest
 
 import numpy as np
 import girona500
@@ -190,16 +190,8 @@ class G500_SLAM():
         #rospy.loginfo("Frame: %s", str(frame))
         return frame
     
+    
     def updateGps(self, gps):
-        self.__LOCK__.acquire()
-        ret_val = None
-        try:
-            ret_val = self._update_gps_(gps)
-        finally:
-            self.__LOCK__.release()
-        return ret_val
-        
-    def _update_gps_(self, gps):
         if gps.data_quality >= 1 and gps.latitude_hemisphere >= 0 and gps.longitude_hemisphere >= 0:
             config = self.config
             config.gps_last_update = gps.header.stamp
@@ -220,28 +212,19 @@ class G500_SLAM():
                 
                 #Right now the GPS is only used to initialize the navigation not for updating it!!!
                 if distance < 0.1:
-                    #print "Update GPS:"
-                    if self.makePrediction(config.gps_last_update):
-                        z = np.array([gps.north, gps.east])
-                        self.slam_worker.update_gps(z)
-                        #self.setNavigation(gps)
-                        self.ros.last_update_time = config.gps_last_update
-                        self.publish_data()
-                        self.slam_worker.resample()
-                else:
-                    print "distance too large, not updating"
-                        
+                    self.__LOCK__.acquire()
+                    try:
+                        if self.makePrediction(config.gps_last_update):
+                            z = np.array([gps.north, gps.east])
+                            self.slam_worker.update_gps(z)
+                            self.ros.last_update_time = config.gps_last_update
+                            self.publish_data()
+                            self.slam_worker.resample()
+                    finally:
+                        self.__LOCK__.release()
+                
         
     def updateTeledyneExplorerDvl(self, dvl):
-        self.__LOCK__.acquire()
-        ret_val = None
-        try:
-            ret_val = self._update_teledyne_explorer_dvl_(dvl)
-        finally:
-            self.__LOCK__.release()
-        return ret_val
-            
-    def _update_teledyne_explorer_dvl_(self, dvl):
         config = self.config
         config.dvl_last_update = dvl.header.stamp
         config.dvl_init = True
@@ -276,45 +259,40 @@ class G500_SLAM():
             self.vehicle.altitude = INVALID_ALTITUDE
             
         if dvl_update != 0:
-            #Rotate DVL velocities and Publish
-            #Compte! EL DVL no es dextrogir i s'ha de negar la Y
-            vr = config.dvl_tf.M * v
-            self.vehicle.twist_linear = np.array([vr[0], -vr[1], vr[2]])
-            
-            #Ara ja tenim la velocitat lineal en el DVL representada en eixos de vehicle
-            #falta calcular la velocitat lineal al centre del vehicle en eixos del vehicle
-            angular_velocity = self.vehicle.twist_angular
-            distance = config.dvl_tf_data[0:3]
-            self.vehicle.twist_linear -= np.cross(angular_velocity, distance)
-            #print "Update dvl:"
-            self.makePrediction(config.dvl_last_update)
-            #dvl_reference = "bottom" if dvl_update == 1 else "water"
-            likelihood_params = \
-                    self.slam_worker.parameters.state_likelihood_fn.parameters
-            likelihood_params.dvl_obs_noise = \
-                likelihood_params.dvl_bottom_noise if dvl_update==1 else \
-                likelihood_params.dvl_water_noise
-            #self.slam_worker.state_likelihood_fn.parameters.dvl_obs_noise = dvl_reference
-            self.slam_worker.update_dvl(self.vehicle.twist_linear)
-            self.ros.last_update_time = config.dvl_last_update
-            self.publish_data()
-            self.slam_worker.resample()
+            self.__LOCK__.acquire()
+            try:
+                #Rotate DVL velocities and Publish
+                #Compte! EL DVL no es dextrogir i s'ha de negar la Y
+                vr = config.dvl_tf.M * v
+                self.vehicle.twist_linear = np.array([vr[0], -vr[1], vr[2]])
+                
+                #Ara ja tenim la velocitat lineal en el DVL representada en eixos de vehicle
+                #falta calcular la velocitat lineal al centre del vehicle en eixos del vehicle
+                angular_velocity = self.vehicle.twist_angular
+                distance = config.dvl_tf_data[0:3]
+                self.vehicle.twist_linear -= np.cross(angular_velocity, distance)
+                
+                self.makePrediction(config.dvl_last_update)
+                #dvl_reference = "bottom" if dvl_update == 1 else "water"
+                likelihood_params = \
+                        self.slam_worker.parameters.state_likelihood_fn.parameters
+                likelihood_params.dvl_obs_noise = \
+                    likelihood_params.dvl_bottom_noise if dvl_update==1 else \
+                    likelihood_params.dvl_water_noise
+                #self.slam_worker.state_likelihood_fn.parameters.dvl_obs_noise = dvl_reference
+                self.slam_worker.update_dvl(self.vehicle.twist_linear)
+                self.ros.last_update_time = config.dvl_last_update
+                self.publish_data()
+                self.slam_worker.resample()
+            finally:
+                self.__LOCK__.release()
         else:
             rospy.loginfo('%s, invalid DVL velocity measurement!', self.name)
         
     
     def updateValeportSoundVelocity(self, svs):
-        self.__LOCK__.acquire()
-        ret_val = None
-        try:
-            ret_val = self._update_valeport_sound_velocity_(svs)
-        finally:
-            self.__LOCK__.release()
-        return ret_val
-            
-    def _update_valeport_sound_velocity_(self, svs):
         config = self.config
-        config.svs_last_update = rospy.Time.now()
+        config.svs_last_update = svs.header.stamp
         config.svs_init = True
         
         svs_data = PyKDL.Vector(.0, .0, svs.pressure)
@@ -323,12 +301,17 @@ class G500_SLAM():
         vehicle_rpy = PyKDL.Rotation.RPY(*pose_angle)
         svs_trans = config.svs_tf.p
         svs_trans = vehicle_rpy * svs_trans
-        svs_data = svs_data + svs_trans
-        self.vehicle.pose_position[2] = svs_data[2]
-        self.makePrediction(config.dvl_last_update)
-        self.slam_worker.update_svs(self.vehicle.pose_position[2])
-        self.ros.last_update_time = config.svs_last_update
-        #self.publish_data()
+        svs_data = svs_data - svs_trans
+        
+        self.__LOCK__.acquire()
+        try:
+            self.vehicle.pose_position[2] = svs_data[2]
+            self.makePrediction(config.dvl_last_update)
+            self.slam_worker.update_svs(self.vehicle.pose_position[2])
+            self.ros.last_update_time = config.svs_last_update
+            self.publish_data()
+        finally:
+            self.__LOCK__.release()
 
     
     def updateImu(self, imu):
@@ -340,7 +323,7 @@ class G500_SLAM():
                                        [imu.orientation.x, imu.orientation.y, 
                                        imu.orientation.z, imu.orientation.w])
         imu_data =  PyKDL.Rotation.RPY(*pose_angle)
-        imu_data = config.imu_tf.M * imu_data
+        imu_data = imu_data*config.imu_tf.M
         pose_angle = imu_data.GetRPY()
         if not config.imu_data :
             config.last_imu_orientation = pose_angle
@@ -357,42 +340,38 @@ class G500_SLAM():
                 config.imu_data = True
             
         else:
-            pose_angle_quaternion = tf.transformations.quaternion_from_euler(
-                                                                *pose_angle)
-            self.vehicle.pose_orientation = pose_angle_quaternion
-            
-            # Derive angular velocities from orientations #####################
-            period = (imu.header.stamp - config.imu_last_update).to_sec()
-            self.vehicle.twist_angular = normalizeAngle(
-             np.array(pose_angle)-np.array(config.last_imu_orientation))/period
-            
-            # For yaw rate we apply a savitzky_golay derivation
-            inc = normalizeAngle(pose_angle[2] - config.heading_buffer[-1])
-            config.heading_buffer.append(config.heading_buffer[-1] + inc)
-            config.heading_buffer.pop(0)
-            self.vehicle.twist_angular[2] = np.convolve(config.heading_buffer, 
-                                                        config.savitzky_golay_coeffs, 
-                                                        mode='valid') / period
-            
-            config.last_imu_orientation = pose_angle
-            config.imu_last_update = imu.header.stamp
-            ###################################################################
             self.__LOCK__.acquire()
             try:
-                ret_val = self._update_imu_(imu)
+                pose_angle_quaternion = tf.transformations.quaternion_from_euler(
+                                                                    *pose_angle)
+                self.vehicle.pose_orientation = pose_angle_quaternion
+                
+                # Derive angular velocities from orientations #####################
+                period = (imu.header.stamp - config.imu_last_update).to_sec()
+                self.vehicle.twist_angular = normalizeAngle(
+                 np.array(pose_angle)-np.array(config.last_imu_orientation))/period
+                
+                # For yaw rate we apply a savitzky_golay derivation
+                inc = normalizeAngle(pose_angle[2] - config.heading_buffer[-1])
+                config.heading_buffer.append(config.heading_buffer[-1] + inc)
+                config.heading_buffer.pop(0)
+                #self.vehicle.twist_angular[2] = np.convolve(config.heading_buffer, 
+                #                                            config.savitzky_golay_coeffs, 
+                #                                            mode='valid') / period
+                
+                config.last_imu_orientation = pose_angle
+                config.imu_last_update = imu.header.stamp
+                
+                self.makePrediction(imu.header.stamp)
+                self.ros.last_update_time = imu.header.stamp
+                self.publish_data()
+                ###############################################################
+                
             finally:
                 self.__LOCK__.release()
         return ret_val
-            
-    def _update_imu_(self, imu):
-        #config = self.config
-        #print "Update imu:"
-        if self.ros.last_update_time < imu.header.stamp:
-            self.makePrediction(imu.header.stamp)
-            self.ros.last_update_time = imu.header.stamp
-            self.publish_data()
-
-    
+        
+        
     def update_features(self, pcl_msg):
         # Convert the pointcloud slam features into normal x,y,z
         # The pointcloud may have uncertainty on the points - this will be
@@ -405,11 +384,6 @@ class G500_SLAM():
     
     
     def makePrediction(self, predict_to_time):
-        # Spin until the lock is free
-        #while self.__LOCK__:
-        #    pass
-        # Grab the lock
-        #self.__LOCK__ = 1
         config = self.config
         if not config.init:
             time_now = predict_to_time
@@ -424,21 +398,16 @@ class G500_SLAM():
                 print "Resetting states to ", str(init.north), ", ", str(init.east)
                 self.setNavigation(init)
                 config.init = True
-            #self.__LOCK__ = 0
             return False
         else:
-            #print "makePrediction()"
             pose_angle = tf.transformations.euler_from_quaternion(
                                                 self.vehicle.pose_orientation)
-            #time_now = rospy.Time.now()
             if predict_to_time < config.last_prediction:
                 return True
             time_now = predict_to_time
             config.last_prediction = time_now
             time_now = time_now.to_sec()
             self.slam_worker.predict_state(pose_angle, time_now)
-            #self.__LOCK__ = 0
-            #code.interact(local=locals())
             return True
             
     

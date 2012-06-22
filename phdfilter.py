@@ -42,6 +42,8 @@ import numpy as np
 import copy
 from misctools import get_resample_index
 
+import code
+
 class PARAMETERS(object): pass
 
 def fn_params(handle=None, parameters=None):
@@ -169,7 +171,7 @@ class PHD(object):
         new_object.parameters = copy.deepcopy(self.parameters)
         new_object.states = self.states.copy()
         new_object._states_ = self._states_.copy()
-        
+        return new_object
         
     def set_states(self, states, weights):
         self.states = states
