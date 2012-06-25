@@ -5,7 +5,9 @@ Created on Tue Jun 12 15:49:04 2012
 @author: snagappa
 """
 
-import matplotlib as mpl
+import matplotlib
+import matplotlib.pyplot
+mpl = matplotlib
 import matplotlib.nxutils as nxutils
 import numpy as np
 import copy
@@ -95,6 +97,8 @@ class SLAM_MAP(object):
         Scene._landmarks_ = copy.deepcopy(self._landmarks_)
         Scene._waypoints_ = copy.deepcopy(self._waypoints_)
         
+Scene = SLAM_MAP()
+
 
 class SLAM_MAP_BUILDER(SLAM_MAP):
     def __init__(self):
@@ -144,7 +148,7 @@ class SLAM_MAP_BUILDER(SLAM_MAP):
         self.fig.sca(self.ax)
         #self.ax.set_axes(self.points_collection.axes)
         self.draw()
-        mpl.pyplot.show()
+        #mpl.pyplot.show()
         
         
     def addpoint(self, event):
@@ -183,12 +187,15 @@ class SLAM_SIMULATOR(object):
         self.viewer = self.init_viewer()
         self.init_ros(name)
         self.last_update = rospy.Time.now()
+        timer = self.viewer.fig.canvas.new_timer(interval=50)
+        timer.add_callback(self.draw, self.viewer.ax)
+        timer.start()
         mpl.pyplot.show()
         
     def init_ros(self, name):
-        rospy.init_node(name)
+        #rospy.init_node(name)
         # Create Subscriber
-        rospy.Subscriber("/uwsim/girona500_odom", Odometry, self.callback)
+        rospy.Subscriber("/uwsim/girona500_odom", Odometry, self.update_position)
         
     def init_viewer(self):
         viewer = STRUCT()
@@ -198,7 +205,7 @@ class SLAM_SIMULATOR(object):
         viewer.ylim = [-10, 10]
         return viewer
     
-    def callback(self, odom):
+    def update_position(self, odom):
         # received a new position, update the viewer
         position = np.array([odom.pose.pose.position.x,
                              odom.pose.pose.position.y,
@@ -211,7 +218,6 @@ class SLAM_SIMULATOR(object):
                                              odom.pose.pose.orientation.z,
                                              odom.pose.pose.orientation.w])
         self.vehicle.orientation = orientation
-        self.draw()
         
     def visible_landmarks(self, width=2.0, length=1.0):
         x = self.vehicle.position[1]
@@ -241,7 +247,7 @@ class SLAM_SIMULATOR(object):
             vis_landmarks = np.empty(0)
         return vis_landmarks, vertices
         
-    def draw(self):
+    def draw(self, *args, **kwargs):
         viewer = self.viewer
         viewer.ax.clear()
         viewer.ax.cla()
@@ -266,3 +272,10 @@ class SLAM_SIMULATOR(object):
             viewer.ax.scatter(landmarks[:,0], landmarks[:,1])
         viewer.fig.canvas.draw()
     
+if __name__ == '__main__':
+    try:
+        #   Init node
+        rospy.init_node('phdslam')
+        slamsim = SLAM_SIMULATOR(rospy.get_name())
+        mpl.pyplot.show()
+    except rospy.ROSInterruptException: pass
