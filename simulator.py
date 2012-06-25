@@ -182,14 +182,18 @@ class SLAM_SIMULATOR(object):
         self.name = name
         self.map_builder = SLAM_MAP_BUILDER()
         self.vehicle = STRUCT()
-        self.vehicle.position = None
-        self.vehicle.orientation = None
+        self.vehicle.position = np.zeros(3)
+        self.vehicle.orientation = np.zeros(3)
         self.viewer = self.init_viewer()
         self.init_ros(name)
         self.last_update = rospy.Time.now()
-        timer = self.viewer.fig.canvas.new_timer(interval=50)
-        timer.add_callback(self.draw, self.viewer.ax)
-        timer.start()
+        self.timers = STRUCT()
+        self.timers.update_image = self.viewer.fig.canvas.new_timer(interval=50)
+        self.timers.update_image.add_callback(self.draw)
+        self.timers.update_image.start()
+        self.timers.publisher = self.viewer.fig.canvas.new_timer(interval=1000)
+        self.timers.publisher.add_callback(self.publish_visible)
+        self.timers.publisher.start()
         mpl.pyplot.show()
         
     def init_ros(self, name):
@@ -272,6 +276,20 @@ class SLAM_SIMULATOR(object):
             viewer.ax.scatter(landmarks[:,0], landmarks[:,1])
         viewer.fig.canvas.draw()
     
+    def publish_visible(self, *args, **kwargs):
+        features = self.visible_landmarks()[0]
+        if not features.shape[0]: return
+        x = self.vehicle.position[1]
+        y = self.vehicle.position[0]
+        relative_position = features - np.array([x, y])
+        yaw = self.vehicle.orientation[2]
+        rotation_matrix = np.array([[np.cos(yaw), -np.sin(yaw)],
+                                    [np.sin(yaw), np.cos(yaw)]])
+        relative_position = np.dot(rotation_matrix, relative_position.T)
+        # Convert to a pointcloud and publish
+        print relative_position.T
+        
+        
 if __name__ == '__main__':
     try:
         #   Init node
