@@ -18,7 +18,8 @@ roslib.load_manifest("g500slam")
 from nav_msgs.msg import Odometry
 import rospy
 import tf
-
+from sensor_msgs.msg import PointCloud2
+import pc2wrapper
 
 class STRUCT(object): pass
 
@@ -178,7 +179,7 @@ class SLAM_MAP_BUILDER(SLAM_MAP):
 
 
 class SLAM_SIMULATOR(object):
-    def __init__(self, name="slam_sim"):
+    def __init__(self, name="slamsim"):
         self.name = name
         self.map_builder = SLAM_MAP_BUILDER()
         self.vehicle = STRUCT()
@@ -194,12 +195,15 @@ class SLAM_SIMULATOR(object):
         self.timers.publisher = self.viewer.fig.canvas.new_timer(interval=1000)
         self.timers.publisher.add_callback(self.publish_visible)
         self.timers.publisher.start()
+        self.pcl_msg = PointCloud2()
         mpl.pyplot.show()
         
     def init_ros(self, name):
         #rospy.init_node(name)
         # Create Subscriber
         rospy.Subscriber("/uwsim/girona500_odom", Odometry, self.update_position)
+        # Create Publisher
+        self.pcl_publisher = rospy.Publisher("/slamsim/features", PointCloud2)
         
     def init_viewer(self):
         viewer = STRUCT()
@@ -285,15 +289,19 @@ class SLAM_SIMULATOR(object):
         yaw = self.vehicle.orientation[2]
         rotation_matrix = np.array([[np.cos(yaw), -np.sin(yaw)],
                                     [np.sin(yaw), np.cos(yaw)]])
-        relative_position = np.dot(rotation_matrix, relative_position.T)
+        relative_position = np.dot(rotation_matrix, relative_position.T).T
+        relative_position = np.hstack((relative_position, np.zeros((relative_position.shape[0], 1))))
         # Convert to a pointcloud and publish
-        print relative_position.T
-        
+        pcl_msg = self.pcl_msg
+        pcl_msg.header.stamp = rospy.Time.now()
+        pcl_msg.header.frame_id = "slamsim"
+        pcl_msg = pc2wrapper.create_cloud_xyz32(pcl_msg.header, relative_position)
+        self.pcl_publisher.publish(pcl_msg)
         
 if __name__ == '__main__':
     try:
         #   Init node
-        rospy.init_node('phdslam')
+        rospy.init_node('slamsim')
         slamsim = SLAM_SIMULATOR(rospy.get_name())
         mpl.pyplot.show()
     except rospy.ROSInterruptException: pass
