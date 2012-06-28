@@ -149,7 +149,7 @@ class G500_SLAM():
             rospy.Subscriber("/navigation_g500/fastrax_it_500_gps", 
                              FastraxIt500Gps, self.updateGps)
         # Subscribe to visiona slam-features node
-        rospy.Subscriber("/slam_features/vision_pcl", PointCloud2, 
+        rospy.Subscriber("/slamsim/features", PointCloud2, 
                          self.update_features)
         # Subscribe to sonar slam features node for
         #rospy.Subscriber("/slam_features/fls_pcl", PointCloud2, 
@@ -293,7 +293,6 @@ class G500_SLAM():
     def updateValeportSoundVelocity(self, svs):
         config = self.config
         config.svs_last_update = svs.header.stamp
-        config.svs_init = True
         
         svs_data = PyKDL.Vector(.0, .0, svs.pressure)
         pose_angle = tf.transformations.euler_from_quaternion(
@@ -303,10 +302,22 @@ class G500_SLAM():
         svs_trans = vehicle_rpy * svs_trans
         svs_data = svs_data - svs_trans
         
+        if not config.svs_init:
+            config.svs_init = True
+            self.__LOCK__.acquire()
+            try:
+                print "INITIALISING DEPTH to ", str(svs_data[2])
+                self.vehicle.pose_position[2] = svs_data[2]
+                self.slam_worker.states[:,2] = svs_data[2]
+            finally:
+                self.__LOCK__.release()
+            return
+        
         self.__LOCK__.acquire()
         try:
+            #code.interact(local=locals())
             self.vehicle.pose_position[2] = svs_data[2]
-            self.makePrediction(config.dvl_last_update)
+            self.makePrediction(config.svs_last_update)
             self.slam_worker.update_svs(self.vehicle.pose_position[2])
             self.ros.last_update_time = config.svs_last_update
             self.publish_data()
@@ -373,15 +384,21 @@ class G500_SLAM():
         
         
     def update_features(self, pcl_msg):
-        # Convert the pointcloud slam features into normal x,y,z
-        # The pointcloud may have uncertainty on the points - this will be
-        # the observation noise
-        slam_features = pointclouds.pointcloud2_to_xyz_array(pcl_msg)
+        self.__LOCK__.acquire()
+        try:
+            # Convert the pointcloud slam features into normal x,y,z
+            # The pointcloud may have uncertainty on the points - this will be
+            # the observation noise
+            slam_features = pointclouds.pointcloud2_to_xyz_array(pcl_msg)
+            
+            # We can now access the points as slam_features[i]
+            self.slam_worker.update_with_features(slam_features, 
+                                                  pcl_msg.header.stamp)
+            self.publish_data()
+            self.slam_worker.resample()
+        finally:
+            self.__LOCK__.release()
         
-        # We can now access the points as slam_features.[{'x','y','z'}]
-        self.slam_worker.update_with_features(slam_features, 
-                                              pcl_msg.header.stamp)
-    
     
     def makePrediction(self, predict_to_time):
         config = self.config
@@ -397,6 +414,7 @@ class G500_SLAM():
                 self.slam_worker.reset_states()
                 print "Resetting states to ", str(init.north), ", ", str(init.east)
                 self.setNavigation(init)
+                self.slam_worker.states[:,2] = self.vehicle.pose_position[2]
                 config.init = True
             return False
         else:
@@ -407,7 +425,7 @@ class G500_SLAM():
             time_now = predict_to_time
             config.last_prediction = time_now
             time_now = time_now.to_sec()
-            self.slam_worker.predict_state(pose_angle, time_now)
+            self.slam_worker.predict(np.array(pose_angle), time_now)
             return True
             
     

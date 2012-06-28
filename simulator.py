@@ -16,10 +16,16 @@ import scipy.interpolate
 import roslib
 roslib.load_manifest("g500slam")
 from nav_msgs.msg import Odometry
+from control_g500.srv import GotoSrv, GotoSrvRequest
 import rospy
 import tf
 from sensor_msgs.msg import PointCloud2
-import pc2wrapper
+#import pc2wrapper
+import pointclouds
+import girona500
+import code
+
+import threading
 
 class STRUCT(object): pass
 
@@ -58,6 +64,11 @@ class SLAM_MAP(object):
         self._current_list_.append(point)
         self.draw()
         
+    def pop_waypoint(self, event):
+        if len(self._waypoints_):
+            self._waypoints_.pop(0)
+        self.draw()
+    
     def undo(self, event):
         if len(self._current_list_):
             self.__last_point__ = self._current_list_.pop()
@@ -113,10 +124,11 @@ class SLAM_MAP_BUILDER(SLAM_MAP):
         self.xlim = [-10, 10]
         self.ylim = [-10, 10]
         
-        # Undo button
+        # Buttons
         self.buttons = STRUCT()
         self.buttons.undo = STRUCT()
         self.buttons.redo = STRUCT()
+        self.buttons.pop = STRUCT()
         self.buttons.save = STRUCT()
         self.buttons.radio = STRUCT()
         
@@ -130,10 +142,15 @@ class SLAM_MAP_BUILDER(SLAM_MAP):
         self.buttons.redo.object = mpl.widgets.Button(self.buttons.redo.ax, 'Redo')
         self.buttons.redo.object.on_clicked(self.redo)
         
+        # Pop button
+        self.buttons.pop.ax = mpl.pyplot.axes([0.59, 0.05, 0.1, 0.075])
+        self.buttons.pop.object = mpl.widgets.Button(self.buttons.pop.ax, 'Pop WP')
+        self.buttons.pop.object.on_clicked(self.pop_waypoint)
+        
         # Save button
-        self.buttons.save.ax = mpl.pyplot.axes([0.51, 0.05, 0.1, 0.075])
-        self.buttons.save.object = mpl.widgets.Button(self.buttons.save.ax, 'Save')
-        self.buttons.save.object.on_clicked(self.save_scene)
+        #self.buttons.save.ax = mpl.pyplot.axes([0.51, 0.05, 0.1, 0.075])
+        #self.buttons.save.object = mpl.widgets.Button(self.buttons.save.ax, 'Save')
+        #self.buttons.save.object.on_clicked(self.save_scene)
         
         # Radio buttons
         self.buttons.radio.axcolor = 'lightgoldenrodyellow'
@@ -181,6 +198,10 @@ class SLAM_MAP_BUILDER(SLAM_MAP):
 class SLAM_SIMULATOR(object):
     def __init__(self, name="slamsim"):
         self.name = name
+        self.RUNNING = False
+        self.ABORT = False
+        self.traverse_path_thread = None
+        
         self.map_builder = SLAM_MAP_BUILDER()
         self.vehicle = STRUCT()
         self.vehicle.position = np.zeros(3)
@@ -209,10 +230,59 @@ class SLAM_SIMULATOR(object):
         viewer = STRUCT()
         viewer.fig = mpl.pyplot.figure()
         viewer.ax = viewer.fig.add_subplot(111)
+        viewer.fig.subplots_adjust(bottom=0.2)
+        
+        # Start/stop button
+        viewer.buttons = STRUCT()
+        viewer.buttons.start = STRUCT()
+        viewer.buttons.stop = STRUCT()
+        
+        viewer.buttons.start.ax = mpl.pyplot.axes([0.71, 0.05, 0.1, 0.075])
+        viewer.buttons.start.object = mpl.widgets.Button(viewer.buttons.start.ax, 'Start')
+        viewer.buttons.start.object.on_clicked(self.traverse_path)
+        
+        viewer.buttons.stop.ax = mpl.pyplot.axes([0.81, 0.05, 0.1, 0.075])
+        viewer.buttons.stop.object = mpl.widgets.Button(viewer.buttons.stop.ax, 'Stop')
+        viewer.buttons.stop.object.on_clicked(self.stop_traverse_path)
+        
         viewer.xlim = [-10, 10]
         viewer.ylim = [-10, 10]
         return viewer
     
+    def traverse_path(self, event):
+        if self.RUNNING:
+            print "Already running..."
+            return
+        self.RUNNING = True
+        self.traverse_path_thread = threading.Thread(target=self._traverse_path_)
+        self.traverse_path_thread.start()
+        
+    def stop_traverse_path(self, event):
+        self.ABORT = True
+        
+    def _traverse_path_(self):
+        try:
+            rospy.wait_for_service("/control_g500/goto", timeout=5)
+        except rospy.ROSException:
+            print "Could not execute path"
+            return
+        
+        goto_wp = rospy.ServiceProxy("/control_g500/goto", GotoSrv)
+        waypoints = self.map_builder.waypoints()
+        
+        for wp in waypoints:
+            if self.ABORT:
+                self.RUNNING = False
+                self.ABORT = False
+                return
+            goto_wp_req = GotoSrvRequest()
+            goto_wp_req.north = wp[1]
+            goto_wp_req.east = wp[0]
+            response = goto_wp(goto_wp_req)
+            print response
+        self.RUNNING = False
+        
+        
     def update_position(self, odom):
         # received a new position, update the viewer
         position = np.array([odom.pose.pose.position.x,
@@ -227,26 +297,36 @@ class SLAM_SIMULATOR(object):
                                              odom.pose.pose.orientation.w])
         self.vehicle.orientation = orientation
         
-    def visible_landmarks(self, width=2.0, length=1.0):
-        x = self.vehicle.position[1]
-        y = self.vehicle.position[0]
-        orientation = self.vehicle.orientation[2]
+    def visible_landmarks(self, vis_width=1.5, vis_depth=3.0):
+        north = self.vehicle.position[0]
+        east = self.vehicle.position[1]
+        depth = self.vehicle.position[2]
+        yaw = self.vehicle.orientation[2]-np.pi/2
         
-        delta_x = width/2*np.cos(np.pi-(np.pi/2-orientation)-np.pi/2)
-        delta_y = width/2*np.sin(np.pi-(np.pi/2-orientation)-np.pi/2)
-        extra_x = length*np.cos(np.pi-orientation-np.pi/2)
-        extra_y = length*np.sin(np.pi-orientation-np.pi/2)
+        # Set vertices
+        vertices = np.array([[0, vis_width/2], [vis_depth, vis_width/2], 
+                             [vis_depth, -vis_width/2], [0, -vis_width/2]])
+        # Rotate by the yaw
+        cy = np.cos(yaw)
+        sy = np.sin(yaw)
+        vertices = np.dot(np.array([[cy, sy], [-sy, cy]]), vertices.T).T
+        vertices += np.array([east, north])
+        
+        #delta_x = width/2*np.cos(np.pi/2-orientation)
+        #delta_y = width/2*np.sin(np.pi/2-orientation)
+        #extra_x = depth*np.cos(orientation)
+        #extra_y = depth*np.sin(orientation)
         """
         vertices = np.array([[x-width/2, y],
                              [x-width/2, y+length/2],
                              [x+width/2, y+length/2],
                              [x+width/2, y]])
         """
-        vertices = np.array([[x+delta_x, y-delta_y], 
-                             [x-delta_x, y+delta_y],
-                             [x+extra_x-delta_x, y+extra_y+delta_y],
-                             [x+extra_x+delta_x, y+extra_y-delta_y]])
-        
+        #vertices = np.array([[x+delta_x, y-delta_y], 
+        #                     [x-delta_x, y+delta_y],
+        #                     [x+extra_x-delta_x, y+extra_y+delta_y],
+        #                     [x+extra_x+delta_x, y+extra_y-delta_y]])
+        #vertices = np.dot(np.array([[0, 1], [-1, 0]]), vertices.T).T
         landmarks = self.map_builder.landmarks()
         if landmarks.shape[0]:
             landmarks_mask = nxutils.points_inside_poly(landmarks, vertices)
@@ -283,20 +363,26 @@ class SLAM_SIMULATOR(object):
     def publish_visible(self, *args, **kwargs):
         features = self.visible_landmarks()[0]
         if not features.shape[0]: return
-        x = self.vehicle.position[1]
-        y = self.vehicle.position[0]
-        relative_position = features - np.array([x, y])
-        yaw = self.vehicle.orientation[2]
-        rotation_matrix = np.array([[np.cos(yaw), -np.sin(yaw)],
-                                    [np.sin(yaw), np.cos(yaw)]])
-        relative_position = np.dot(rotation_matrix, relative_position.T).T
-        relative_position = np.hstack((relative_position, np.zeros((relative_position.shape[0], 1))))
-        # Convert to a pointcloud and publish
-        pcl_msg = self.pcl_msg
-        pcl_msg.header.stamp = rospy.Time.now()
-        pcl_msg.header.frame_id = "slamsim"
-        pcl_msg = pc2wrapper.create_cloud_xyz32(pcl_msg.header, relative_position)
+        features = np.array(np.hstack((features, np.zeros((features.shape[0], 1)))), order='C')
+        # Convert north-east-z to x-y-z
+        vehicle_xyz = self.vehicle.position
+        relative_position = girona500.feature_relative_position(vehicle_xyz, self.vehicle.orientation, features)
+        
+        # Convert xyz to PointCloud message
+        pcl_msg = pointclouds.xyz_array_to_pointcloud2(relative_position, 
+                                                       rospy.Time.now(), "slamsim")
+        # and publish visible landmarks
         self.pcl_publisher.publish(pcl_msg)
+        print "Absolute:"
+        print features
+        """
+        print "Relative:"
+        print relative_position
+        print "Inverse:"
+        inverse_position = girona500.feature_absolute_position(vehicle_xyz, np.array(self.vehicle.orientation), relative_position)
+        print inverse_position
+        """
+        
         
 if __name__ == '__main__':
     try:

@@ -123,7 +123,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
                                   TRANSPOSE_B=True, beta=0.0), beta=0.0)[0]
         return trans_mat, sc_process_noise
     
-    def predict_state(self, ctrl_input, predict_to_time):
+    def predict(self, ctrl_input, predict_to_time):
         if self.last_odo_predict_time==0:
             self.last_odo_predict_time = predict_to_time
             return
@@ -141,7 +141,28 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
                                                   cov=sc_process_noise, 
                                                   size=(nparticles))
         self.states = pred_states
-
+        states_xyz = np.array(pred_states[:,0:3])
+        # Copy the predicted states to the "parent state" attribute and 
+        # perform a prediction for the map
+        for i in range(self.parameters.state_parameters["nparticles"]):
+            #self.maps[i].parameters.obs_fn.H = self.trans_matrices(-ctrl_input, 1.0)[0]
+            setattr(self.maps[i].parameters.obs_fn.parameters, 
+                    "parent_state_xyz", states_xyz[i])
+            setattr(self.maps[i].parameters.obs_fn.parameters, 
+                    "parent_state_rpy", ctrl_input)
+            setattr(self.maps[i].parameters.pd_fn.parameters, 
+                    "parent_state_xyz", states_xyz[i])
+            setattr(self.maps[i].parameters.pd_fn.parameters, 
+                    "parent_state_rpy", ctrl_input)
+            setattr(self.maps[i].parameters.birth_fn.parameters, 
+                    "parent_state_xyz", states_xyz[i])
+            setattr(self.maps[i].parameters.birth_fn.parameters, 
+                    "parent_state_rpy", ctrl_input)
+        
+        #self.parameters.state_parameters.delta_t = delta_t
+        # PHD Prediction is not necessary - ps = 1, Q = 0
+        #[self.maps[i].phdPredict() 
+        #        for i in range(self.parameters.state_parameters["nparticles"])]
         
     
     def update_gps(self, gps_obs):
@@ -175,7 +196,48 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         self.weights *= likelihood
         self.weights /= self.weights.sum()
     
+    def update_with_features(self, observation_set, update_to_time):
+        #print "Observed:"
+        #print observation_set
+        #state_xyz = self.maps[0].parameters.obs_fn.parameters.parent_state_xyz
+        state_rpy = self.maps[0].parameters.obs_fn.parameters.parent_state_rpy
+        #code.interact(local=locals())
+        feature_abs_posn = [feature_absolute_position(self.maps[i].parameters.obs_fn.parameters.parent_state_xyz, state_rpy, observation_set) for i in range(len(self.maps))]
+        feature_abs_posn = np.array(feature_abs_posn).mean(axis=0)
+        
+        print "Absolute (inverse):"
+        print feature_abs_posn
+        #print "state xyz:"
+        #print state_xyz
+        
     
+def feature_relative_position(vehicle_xyz, vehicle_rpy, features_xyz):
+    if not features_xyz.shape[0]: return np.empty(0)
+    relative_position = features_xyz - vehicle_xyz
+    r, p, y = 0, 1, 2
+    c = np.cos(vehicle_rpy)
+    s = np.sin(vehicle_rpy)
+    rotation_matrix = np.array([
+                [[c[p]*c[y], -c[r]*s[y]+s[r]*s[p]*c[y], s[r]*s[y]+c[r]*s[p]*c[y] ],
+                 [c[p]*s[y], c[r]*c[y]+s[r]*s[p]*s[y], -s[r]*c[y]+c[r]*s[p]*s[y] ],
+                 [-s[p], s[r]*c[p], c[r]*c[p] ]]])
+    
+    relative_position = blas.dgemv(rotation_matrix, relative_position)
+    #np.dot(rotation_matrix, relative_position.T).T
+    return relative_position
+
+def feature_absolute_position(vehicle_xyz, vehicle_rpy, features_xyz):
+    if not features_xyz.shape[0]: return np.empty(0)
+    r, p, y = 0, 1, 2
+    c = np.cos(-vehicle_rpy)
+    s = np.sin(-vehicle_rpy)
+    rotation_matrix = np.array([
+                [[c[p]*c[y], -c[r]*s[y]+s[r]*s[p]*c[y], s[r]*s[y]+c[r]*s[p]*c[y] ],
+                 [c[p]*s[y], c[r]*c[y]+s[r]*s[p]*s[y], -s[r]*c[y]+c[r]*s[p]*s[y] ],
+                 [-s[p], s[r]*c[p], c[r]*c[p] ]]])
+    
+    absolute_position = blas.dgemv(rotation_matrix, features_xyz) + vehicle_xyz
+    return absolute_position
 
 def g500_kf_update(weights, states, covs, obs_matrix, obs_noise, z):
     upd_weights = weights.copy()
@@ -258,6 +320,8 @@ def g500_slam_fn_defs():
     feature_obs_fn_parameters = PARAMETERS()
     feature_obs_fn_parameters.H = np.eye(ndims)
     feature_obs_fn_parameters.R = np.eye(ndims)
+    feature_obs_fn_parameters.parent_state_xyz = np.zeros(3)
+    feature_obs_fn_parameters.parent_state_rpy = np.zeros(3)
     feature_obs_fn = fn_params(feature_obs_fn_handle, 
                                feature_obs_fn_parameters)
     
@@ -276,10 +340,12 @@ def g500_slam_fn_defs():
     clutter_fn = fn_params(clutter_fn_handle, clutter_fn_parameters)
     
     # Birth function
-    birth_fn_handle = gmphdfilter.measurement_birth
+    birth_fn_handle = camera_birth
     birth_fn_parameters = PARAMETERS()
     birth_fn_parameters.intensity = 0.01
     birth_fn_parameters.obs2state = lambda x: np.array(x)
+    birth_fn_parameters.parent_state_xyz = np.zeros(3)
+    birth_fn_parameters.parent_state_rpy = np.zeros(3)
     birth_fn = fn_params(birth_fn_handle, birth_fn_parameters)
     
     # Survival/detection probability
@@ -287,9 +353,13 @@ def g500_slam_fn_defs():
     ps_fn_parameters = PARAMETERS()
     ps_fn_parameters.ps = 1
     ps_fn = fn_params(ps_fn_handle, ps_fn_parameters)
-    pd_fn_handle = gmphdfilter.constant_detection
+    pd_fn_handle = camera_pd
     pd_fn_parameters = PARAMETERS()
-    pd_fn_parameters.pd = 0.98
+    pd_fn_parameters.width = 2.0
+    pd_fn_parameters.depth = 3.0
+    pd_fn_parameters.height = 1.0
+    pd_fn_parameters.parent_state_xyz = np.zeros(3)
+    pd_fn_parameters.parent_state_rpy = np.zeros(3)
     pd_fn = fn_params(pd_fn_handle, pd_fn_parameters)
     
     # Use default estimator
@@ -305,7 +375,18 @@ def g500_slam_fn_defs():
                         clutter_fn, birth_fn, ps_fn, pd_fn,
                         feature_estimate_fn, feature_parameters)
     
+
+def camera_pd(states, parameters):
+    parent_state = parameters.parent_state
+    # Rotate the states by parent state orientation
     
+def camera_birth(z, parameters):
+    # Convert the relative z to absolute z
+    
+    #
+    birth_states, birth_weights = gmphdfilter.measurement_birth(z, parameters)
+    return birth_states, birth_weights
+
 ##############################################################################
 # Start ROS related functions
 def add_ros_param(container, param):
