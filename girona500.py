@@ -184,17 +184,21 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         self.weights /= self.weights.sum()
         
     def update_svs(self, svs_obs):
-        pred_svs_obs = self.states[:, 2].copy()
-        # Fix the shape so it is two-dimensional
-        pred_svs_obs.shape += (1,)
-        loglikelihood = np.log(misctools.mvnpdf(np.array([[svs_obs]]), 
-                                                pred_svs_obs, 
-                                                np.array([[[0.2]]])) +
-                               np.finfo(np.double).tiny)
-        loglikelihood -= max(loglikelihood)
-        likelihood = np.exp(loglikelihood)
-        self.weights *= likelihood
-        self.weights /= self.weights.sum()
+        OVERWRITE_DEPTH = True
+        if OVERWRITE_DEPTH:
+            self.states[:, 2] = svs_obs
+        else:
+            pred_svs_obs = self.states[:, 2].copy()
+            # Fix the shape so it is two-dimensional
+            pred_svs_obs.shape += (1,)
+            loglikelihood = np.log(misctools.mvnpdf(np.array([[svs_obs]]), 
+                                                    pred_svs_obs, 
+                                                    np.array([[[0.2]]])) +
+                                   np.finfo(np.double).tiny)
+            loglikelihood -= max(loglikelihood)
+            likelihood = np.exp(loglikelihood)
+            self.weights *= likelihood
+            self.weights /= self.weights.sum()
     
     def update_with_features(self, observation_set, update_to_time):
         #print "Observed:"
@@ -202,15 +206,47 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         #state_xyz = self.maps[0].parameters.obs_fn.parameters.parent_state_xyz
         state_rpy = self.maps[0].parameters.obs_fn.parameters.parent_state_rpy
         #code.interact(local=locals())
-        feature_abs_posn = [feature_absolute_position(self.maps[i].parameters.obs_fn.parameters.parent_state_xyz, state_rpy, observation_set) for i in range(len(self.maps))]
-        feature_abs_posn = np.array(feature_abs_posn).mean(axis=0)
+        observation_set = np.array(observation_set[:, [1, 0, 2]], order='C')
+        feature_abs_posn = np.array([self.weights[i]*feature_absolute_position(self.maps[i].parameters.obs_fn.parameters.parent_state_xyz, state_rpy, observation_set) for i in range(len(self.maps))])
+        feature_abs_posn = feature_abs_posn.sum(axis=0)
         
         print "Absolute (inverse):"
         print feature_abs_posn
         #print "state xyz:"
         #print state_xyz
         
-    
+    def resample(self):
+        # Effective number of particles
+        eff_nparticles = 1/np.power(self.weights, 2).sum()
+        resample_threshold = (
+                eff_nparticles/self.parameters.state_parameters["nparticles"])
+        # Check if we have particle depletion
+        if (resample_threshold > 
+                    self.parameters.state_parameters["resample_threshold"]):
+            return
+        # Otherwise we need to resample
+        max_wt_index = self.weights.argmax()
+        max_wt_state = self.states[max_wt_index].copy()
+        max_wt_state[4:] = 0
+        max_wt_map = self.maps[max_wt_index].copy()
+        
+        resample_index = misctools.get_resample_index(self.weights, 
+                            self.parameters.state_parameters["nparticles"]-1)
+        # self.states is a numpy array so the indexing operation forces a copy
+        resampled_states = self.states[resample_index]
+        resampled_states.resize((resampled_states.shape[0]+1, resampled_states.shape[1]))
+        resampled_states[-1] = max_wt_state
+        resampled_maps = [self.maps[i].copy() for i in resample_index]
+        resampled_maps.append(max_wt_map)
+        resampled_weights = (
+          np.ones(self.parameters.state_parameters["nparticles"], dtype=float)*
+          1/float(self.parameters.state_parameters["nparticles"]))
+        
+        self.weights = resampled_weights
+        self.states = resampled_states
+        self.maps = resampled_maps
+        
+        
 def feature_relative_position(vehicle_xyz, vehicle_rpy, features_xyz):
     if not features_xyz.shape[0]: return np.empty(0)
     relative_position = features_xyz - vehicle_xyz
@@ -229,8 +265,8 @@ def feature_relative_position(vehicle_xyz, vehicle_rpy, features_xyz):
 def feature_absolute_position(vehicle_xyz, vehicle_rpy, features_xyz):
     if not features_xyz.shape[0]: return np.empty(0)
     r, p, y = 0, 1, 2
-    c = np.cos(-vehicle_rpy)
-    s = np.sin(-vehicle_rpy)
+    c = np.cos(vehicle_rpy)
+    s = np.sin(vehicle_rpy)
     rotation_matrix = np.array([
                 [[c[p]*c[y], -c[r]*s[y]+s[r]*s[p]*c[y], s[r]*s[y]+c[r]*s[p]*c[y] ],
                  [c[p]*s[y], c[r]*c[y]+s[r]*s[p]*s[y], -s[r]*c[y]+c[r]*s[p]*s[y] ],
@@ -295,9 +331,9 @@ def g500_slam_fn_defs():
     # that the information from the imu is perfect
     # We only need to estimate x,y,z. The roll, pitch and yaw must be fed
     # externally
-    state_parameters = {"nparticles":50,
+    state_parameters = {"nparticles":100,
                         "ndims":6,
-                        "resample_threshold":0.9}
+                        "resample_threshold":0.95}
     
     
     # Parameters for the PHD filter

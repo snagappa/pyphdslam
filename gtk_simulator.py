@@ -27,6 +27,8 @@ from matplotlib.axes import Subplot
 from matplotlib.backends.backend_gtkagg import FigureCanvasGTK
 from matplotlib import cm # colormap
 from matplotlib import pylab
+import matplotlib.nxutils as nxutils
+
 #pylab.hold(False) # This will avoid memory leak
 
 import roslib
@@ -55,6 +57,14 @@ class gtk_slam_sim:
         self.vehicle = STRUCT()
         self.vehicle.north_east_depth = np.zeros(3)
         self.vehicle.roll_pitch_yaw = np.zeros(3)
+        self.vehicle.fov = STRUCT()
+        self.vehicle.fov.width = 1.5
+        self.vehicle.fov.depth = 3.0
+        self.vehicle.visible_landmarks = STRUCT()
+        self.vehicle.visible_landmarks.abs = np.empty(0)
+        self.vehicle.visible_landmarks.rel = np.empty(0)
+        self.vehicle.visible_landmarks.fov = np.empty(0)
+        self.vehicle.LOCK = threading.Lock()
         
         # List of landmarks and waypoints
         self.scene = STRUCT()
@@ -118,13 +128,18 @@ class gtk_slam_sim:
         self.print_position()
         
         self.timers = STRUCT()
+        # Drawing timer
         self.timers.update_image = self.viewer.figure.canvas.new_timer(interval=200)
         self.timers.update_image.add_callback(self.draw)
         self.timers.update_image.start()
+        # Update visible landmarks
+        self.timers.update_visible_landmarks = self.viewer.figure.canvas.new_timer(interval=100)
+        self.timers.update_visible_landmarks.add_callback(self.update_visible_landmarks)
+        self.timers.update_visible_landmarks.start()
+        # ROS publisher
         self.timers.publisher = self.viewer.figure.canvas.new_timer(interval=1000)
-        self.timers.publisher.add_callback(self.publish_visible)
+        self.timers.publisher.add_callback(self.publish_visible_landmarks)
         self.timers.publisher.start()
-        self.pcl_msg = PointCloud2()
         
         self.glade.get_object("MainWindow").show_all()
         
@@ -161,6 +176,7 @@ class gtk_slam_sim:
         
     def set_spinbutton_viewer_width(self, widget):
         self.viewer.size.width = widget.get_value()
+        self.viewer.size.height = self.viewer.size.width
         p = [self.viewer.size.width, self.viewer.size.height]
         print "set new viewer size to ", str(p)
         self.set_damage()
@@ -169,6 +185,14 @@ class gtk_slam_sim:
         self.viewer.size.height = widget.get_value()
         p = [self.viewer.size.width, self.viewer.size.height]
         print "set new viewer size to ", str(p)
+        self.set_damage()
+        
+    def set_spinbutton_fov_width(self, widget):
+        self.vehicle.fov.width = widget.get_value()
+        self.set_damage()
+        
+    def set_spinbutton_fov_depth(self, widget):
+        self.vehicle.fov.depth = widget.get_value()
         self.set_damage()
         
     def undo(self, widget):
@@ -239,6 +263,7 @@ class gtk_slam_sim:
                 goto_wp_req.east = this_wp[0]
                 response = goto_wp(goto_wp_req)
                 print response
+                waypoint_index += 1
         except rospy.ROSException:
             self.simulator.RUNNING = False
             self.simulator.ABORT = False
@@ -249,7 +274,7 @@ class gtk_slam_sim:
         print "Simulation will end when vehicle reaches next waypoint..."
     
     def update_position(self, odom):
-        print "updating position"
+        #print "updating position"
         # received a new position, update the viewer
         position = np.array([odom.pose.pose.position.x,
                              odom.pose.pose.position.y,
@@ -263,6 +288,7 @@ class gtk_slam_sim:
                                              odom.pose.pose.orientation.w])
         self.vehicle.roll_pitch_yaw = np.array(orientation)
         self.print_position()
+        self.update_visible_landmarks()
         
     def print_position(self):
         north, east, depth = np.round(self.vehicle.north_east_depth, 2)
@@ -276,9 +302,64 @@ class gtk_slam_sim:
         
         self.viewer.textview.vehicle_xyz.get_buffer().set_text(text_xyz)
         self.viewer.textview.vehicle_rpy.get_buffer().set_text(text_rpy)
+    
+    def update_visible_landmarks(self, *args, **kwargs):
+        self.vehicle.LOCK.acquire()
+        try:
+            north, east, depth = self.vehicle.north_east_depth
+            yaw = self.vehicle.roll_pitch_yaw[2]
+            vis_width = self.vehicle.fov.width
+            vis_depth = self.vehicle.fov.depth
+            
+            # Set vertices
+            vertices = np.array([[-vis_width/2, 0], [-vis_width/2, vis_depth], 
+                                 [vis_width/2, vis_depth], [vis_width/2, 0]])
+            
+            # Rotate by the yaw
+            cy = np.cos(yaw)
+            sy = np.sin(yaw)
+            vertices = np.dot(np.array([[cy, sy], [-sy, cy]]), vertices.T).T
+            # Translation to vehicle position
+            vertices += np.array([east, north])
+            self.vehicle.visible_landmarks.fov = vertices
+            
+            # copy visible landmarks to self.vehicle.visible_landmarks.abs
+            landmarks = np.array(self.scene.landmarks)
+            if landmarks.shape[0]:
+                landmarks_mask = nxutils.points_inside_poly(landmarks, vertices)
+                self.vehicle.visible_landmarks.abs = landmarks[landmarks_mask]
+                # Pad the landmarks with z=0
+                self.vehicle.visible_landmarks.abs = \
+                    np.array(np.hstack((self.vehicle.visible_landmarks.abs, 
+                    np.zeros((self.vehicle.visible_landmarks.abs.shape[0], 1)))), order='C')
+            else:
+                self.vehicle.visible_landmarks.abs = np.empty(0)
+            # Perform translation/rotation of visible landmarks to
+            # self.vehicle.visible_landmarks.rel
+            self.vehicle.visible_landmarks.rel = \
+                girona500.feature_relative_position(np.array([east, north, depth]), 
+                                                              self.vehicle.roll_pitch_yaw, 
+                                                              self.vehicle.visible_landmarks.abs)
+        finally:
+            self.vehicle.LOCK.release()
+        # Publish the landmarks
+        ##features = np.array(np.hstack((features, np.zeros((features.shape[0], 1)))), order='C')
+        # Convert north-east-z to x-y-z
+        ##vehicle_xyz = self.vehicle.position
+        ##relative_position = girona500.feature_relative_position(vehicle_xyz, self.vehicle.orientation, features)
+        #self.publish_visible_landmarks()
+    
+    def publish_visible_landmarks(self, *args, **kwargs):
+        rel_landmarks = self.vehicle.visible_landmarks.rel
+        if not rel_landmarks.shape[0]: return
         
-    def publish_visible(self, *args, **kwargs):
-        pass
+        # Convert xyz to PointCloud message
+        pcl_msg = pointclouds.xyz_array_to_pointcloud2(rel_landmarks, 
+                                                       rospy.Time.now(), "slamsim")
+        # and publish visible landmarks
+        self.pcl_publisher.publish(pcl_msg)
+        print "Published Landmarks:"
+        print rel_landmarks
     
     def set_damage(self):
         self.viewer.LOCK.acquire()
@@ -296,6 +377,17 @@ class gtk_slam_sim:
         self.viewer.axis.arrow(east, north, arrow_length*np.sin(yaw), 
                                arrow_length*np.cos(yaw), width=arrow_width,
                                length_includes_head=True)
+    
+    def draw_visible_landmarks(self):
+        # Draw fov
+        fov_vertices = self.vehicle.visible_landmarks.fov.copy()
+        if fov_vertices.shape[0]:
+            fov_vertices = np.vstack((fov_vertices, fov_vertices[0]))
+            self.viewer.axis.plot(fov_vertices[:,0], fov_vertices[:,1])
+        # Plot visible landmarks
+        points = np.array(self.vehicle.visible_landmarks.abs)
+        if points.shape[0]:
+            self.viewer.axis.scatter(points[:,0], points[:,1], s=36, marker='o')
     
     def draw(self, *args, **kwargs):
         if not self.viewer.DRAW_CANVAS:
@@ -318,18 +410,28 @@ class gtk_slam_sim:
         
         points = np.array(self.scene.landmarks)
         if points.shape[0]:
-            axis.scatter(points[:,0], points[:,1])
+            axis.scatter(points[:,0], points[:,1], c='r', s=16, marker='o')
         
         self.draw_vehicle()
+        self.draw_visible_landmarks()
         
-        xlim = self.viewer.size.width*np.array([-1, 1])
-        ylim = self.viewer.size.height*np.array([-1, 1])
+        xlim = np.round(self.viewer.size.width*np.array([-1, 1]) + self.vehicle.north_east_depth[1])
+        ylim = np.round(self.viewer.size.height*np.array([-1, 1]) + self.vehicle.north_east_depth[0])
+        if xlim[0] < -100:
+            xlim += -100 - xlim[0]
+        elif xlim[1] > 100:
+            xlim += 100 - xlim[1]
+        if ylim[0] < -100:
+            ylim += -100 - ylim[0]
+        elif ylim[1] > 100:
+            ylim += 100 - ylim[1]
+        
         axis.set_xlim(xlim)
         axis.set_ylim(ylim)
         self.viewer.canvas.draw_idle()
         self.DAMAGE = False
         self.viewer.LOCK.release()
-        
+    
     def quit(self, *args, **kwargs):
         gtk.main_quit()
 

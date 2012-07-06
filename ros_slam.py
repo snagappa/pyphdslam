@@ -81,7 +81,7 @@ class G500_SLAM():
         self.ros = PARAMETERS()
         self.ros.last_update_time = rospy.Time.now()
         self.init_ros()
-        self.__LOCK__ = threading.RLock()
+        self.__LOCK__ = threading.Lock()
         # Set as true to run without gps/imu initialisation
         self.config.init = False
         
@@ -140,17 +140,18 @@ class G500_SLAM():
         
         # Create Subscriber
         rospy.Subscriber("/navigation_g500/teledyne_explorer_dvl", 
-                         TeledyneExplorerDvl, self.updateTeledyneExplorerDvl)
+                         TeledyneExplorerDvl, self.updateTeledyneExplorerDvl,
+                         queue_size=1)
         rospy.Subscriber("/navigation_g500/valeport_sound_velocity", 
                          ValeportSoundVelocity, 
-                         self.updateValeportSoundVelocity)
+                         self.updateValeportSoundVelocity, queue_size=1)
         rospy.Subscriber("/navigation_g500/imu", Imu, self.updateImu)
         if config.gps_update :
             rospy.Subscriber("/navigation_g500/fastrax_it_500_gps", 
-                             FastraxIt500Gps, self.updateGps)
+                             FastraxIt500Gps, self.updateGps, queue_size=1)
         # Subscribe to visiona slam-features node
         rospy.Subscriber("/slamsim/features", PointCloud2, 
-                         self.update_features)
+                         self.update_features, queue_size=1)
         # Subscribe to sonar slam features node for
         #rospy.Subscriber("/slam_features/fls_pcl", PointCloud2, 
         #                 self.update_features)
@@ -259,6 +260,8 @@ class G500_SLAM():
             self.vehicle.altitude = INVALID_ALTITUDE
             
         if dvl_update != 0:
+            #if self.__LOCK__.locked():
+            #    return
             self.__LOCK__.acquire()
             try:
                 #Rotate DVL velocities and Publish
