@@ -29,16 +29,14 @@ g500_navigation module.
 """
 
 import collections
-from phdfilter import fn_params, PARAMETERS
-import gmphdfilter
-import phdslam
+from lib.phdfilter.phdfilter import fn_params, PARAMETERS
+from lib.phdfilter import gmphdfilter
+from lib import phdslam
 import numpy as np
-import misctools
-import blas_tools as blas
+from lib.common import misctools, blas
 import rospy
 import code
-
-from gmphdfilter import blas_kf_update
+from lib.phdfilter.gmphdfilter import blas_kf_update
 
 SLAM_FN_DEFS = collections.namedtuple("SLAM_FN_DEFS", 
                 "state_markov_predict_fn state_obs_fn state_likelihood_fn \

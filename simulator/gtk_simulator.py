@@ -6,6 +6,7 @@ Created on Thu Jun 28 16:39:16 2012
 """
 
 import sys
+import os
 try:  
     import pygtk  
     pygtk.require("2.0")  
@@ -39,8 +40,8 @@ import rospy
 import tf
 from sensor_msgs.msg import PointCloud2
 #import pc2wrapper
-import pointclouds
-import girona500
+from lib.common import pointclouds
+from girona500 import girona500
 
 import threading
 import numpy as np
@@ -101,7 +102,8 @@ class gtk_slam_sim:
         self.viewer.DRAW_CANVAS = True
         
         # Set up GUI
-        self.gladefile = "glade/sim_gui.xml"
+        pkg_dir = os.path.dirname(os.path.abspath(__file__))
+        self.gladefile = os.path.join(pkg_dir, "glade", "sim_gui.xml")
         self.glade = gtk.Builder()
         self.glade.add_from_file(self.gladefile)
         

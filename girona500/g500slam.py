@@ -44,8 +44,8 @@ from navigation_g500.srv import SetNE, SetNEResponse #, SetNERequest
 
 import numpy as np
 import girona500
-from phdfilter import PARAMETERS
-import pointclouds
+from lib.phdfilter.phdfilter import PARAMETERS
+from lib.common import pointclouds
 
 INVALID_ALTITUDE = -32665
 SAVITZKY_GOLAY_COEFFS = [0.2,  0.1,  0. , -0.1, -0.2]
@@ -485,6 +485,14 @@ class G500_SLAM():
             self.init = True
     
 
+def main():
+    try:
+        # Init node
+        rospy.init_node('phdslam')
+        g500_slam = G500_SLAM(rospy.get_name())
+        rospy.spin()
+    except rospy.ROSInterruptException: pass
+
 
 if __name__ == '__main__':
     try:
@@ -493,3 +501,4 @@ if __name__ == '__main__':
         g500_slam = G500_SLAM(rospy.get_name())
         rospy.spin()
     except rospy.ROSInterruptException: pass
+

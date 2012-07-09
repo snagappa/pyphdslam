@@ -25,8 +25,7 @@
 import numpy as np
 import copy
 from scipy import weave
-import blas_tools_c_code
-#import phdmisctools
+import __blas_c_code__ as __c_code__
 #import collections
 
 
@@ -47,11 +46,11 @@ M_M_DIM_MISMATCH = "  *Matrices have incompatible dimensions*  "
 
 
 def blas_weaver(subroutine_string):
-    subroutine = getattr(blas_tools_c_code, subroutine_string)
-    compile_args = getattr(blas_tools_c_code, "EXTRA_COMPILE_ARGS", [])
+    subroutine = getattr(__c_code__, subroutine_string)
+    compile_args = getattr(__c_code__, "EXTRA_COMPILE_ARGS", [])
     compile_args += getattr(subroutine, "extra_compile_args", [])
     
-    fn_string = "blas_tools_c_code."+subroutine_string
+    fn_string = "__c_code__."+subroutine_string
     exec_string = "weave.inline(" + fn_string + ".code, " + fn_string+".python_vars" + ", libraries=" + fn_string + ".libraries" + ", support_code=" + fn_string + ".support_code" + ", extra_compile_args=" + str(compile_args) + ")"
     return exec_string
                  
@@ -940,11 +939,12 @@ def symmetrise(A, UPLO):
         assert A.shape[1]==A.shape[2], "A must be symmetric"
         assert type(UPLO)
         assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'u', 'L', 'U']"
-    weave.inline(blas_tools_c_code.symmetrise.code, 
-                 blas_tools_c_code.symmetrise.python_vars, 
-                 libraries=blas_tools_c_code.symmetrise.libraries,
-                 support_code=blas_tools_c_code.symmetrise.support_code,
-                 extra_compile_args=blas_tools_c_code.EXTRA_COMPILE_ARGS)
+    exec blas_weaver("symmetrise")
+    #weave.inline(blas_c_code.symmetrise.code, 
+    #             blas_c_code.symmetrise.python_vars, 
+    #             libraries=blas_c_code.symmetrise.libraries,
+    #             support_code=blas_c_code.symmetrise.support_code,
+    #             extra_compile_args=blas_c_code.EXTRA_COMPILE_ARGS)
     
 
 
@@ -1145,3 +1145,45 @@ def test_dpotri(num_elements=1000, num_dims=4, num_rows=4):
 
 def test_dposv(num_elements=1000, num_dims=4, num_rows=4):
     pass
+
+print "Initialising..."
+A = np.random.rand(1, 2, 2) + np.eye(2)
+B = np.random.rand(1, 2, 2) + np.eye(2)
+C = np.random.rand(1, 2, 2) + np.eye(2)
+x = np.random.rand(1, 2)
+y = np.random.rand(1, 2)
+UPLO = 'l'
+TR_A = False
+TR_B = False
+SIDE = 'l'
+alpha = np.array([1.0])
+beta = np.array([1.0])
+
+ddot(x, y)
+dnrm2(x)
+dasum(x)
+idamax(x)
+daxpy(alpha, x, y)
+dscal(alpha, x)
+dcopy(x, y)
+dgemv(A, x, TR_A, alpha, beta, y)
+dtrmv(UPLO, A, x, TR_A)
+dtrsv(UPLO, A, x, TR_A)
+dsymv(UPLO, A, x, alpha, beta, y)
+dger(x, y, alpha, A)
+dsyr(UPLO, x, alpha, A)
+dgemm(A, B, TR_A, TR_B, alpha, beta, C)
+dsymm(A, B, UPLO, SIDE, alpha, beta, C)
+dsyrk(UPLO, A, TR_A, alpha, beta, C)
+LU, ipiv, signum = dgetrf(A)
+dgetrs(LU, ipiv, y, x)
+dgetrsx(LU, ipiv, y)
+dgetri(LU, ipiv)
+dgesv(A, y)
+dgetrdet(LU, signum)
+cholA = dpotrf(A)
+dpotrs(cholA, y, x)
+dpotrsx(cholA, y)
+dpotri(A)
+symmetrise(A, UPLO)
+del A, B, C, x, y, UPLO, TR_A, TR_B, SIDE, alpha, beta, LU, ipiv, signum

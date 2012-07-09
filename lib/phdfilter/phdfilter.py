@@ -40,7 +40,7 @@ are required."""
 
 import numpy as np
 import copy
-from misctools import get_resample_index
+from lib.common.misctools import get_resample_index
 
 import code
 

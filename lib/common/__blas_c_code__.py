@@ -88,6 +88,7 @@ extern "C" {
     int idamax_(int *N, double *X, int *INCX);
     int daxpy_(int *N, double *ALPHA, double *X, int *INCX, double *Y, int *INCY);
     int dscal_(int *N, double *ALPHA, double *X, int *INCX);
+    int dcopy_(int *N, double *X, int *INCX, double *Y, int *INCY);
     int dgemv_(char *TRANS, int *M, int *N, double *ALPHA, double *A, int *LDA, double *X, int *INCX, double *BETA, double *Y, int *INCY);
     //int dger_(int *M, )
 }
@@ -369,12 +370,15 @@ class dcopy:
     libraries = lptf77blas+lgomp
     python_vars = ["x", "y"]
     code = """
-    int i, num_x;
-    int vec_len, x_offset, inc;
+    int nthreads, tid;
+    int i, num_x, num_y;
+    int x_offset, inc, y_offset;
     
     inc = 1;
     num_x = Nx[0];
-    vec_len = Nx[1];
+    x_offset = num_x==1?0:Nx[1];
+    num_y = Ny[0];
+    y_offset = num_y==1?0:Ny[1];
     
     #pragma omp parallel shared(nthreads) private(i, tid)
     {
@@ -386,9 +390,9 @@ class dcopy:
     }
     
     #pragma omp parallel for \
-        shared(num_x, vec_len, x, x_offset, inc) private(i)
+        shared(num_x, x_offset, x, inc, y, y_offset) private(i)
     for (i=0; i<num_x;i++)
-        dcopy_(&vec_len, x+(i*x_offset), 1, y+(i*y_offset), 1);
+        dcopy_(&x_offset, x+(i*x_offset), &inc, y+(i*y_offset), &inc);
     """
     
 
@@ -587,7 +591,7 @@ class dtrmv:
     for (i=0; i<num_x; i++) {
         gsl_A = gsl_matrix_view_array(A+(i*A_offset), nrows, nrows);
         gsl_x = gsl_vector_view_array(x+(i*x_offset), vec_len);
-        gsl_blas_dtrmv (Uplo, Trans_A, CblasNonUnit, &gsl_A.matrix, &gsl_x.vector);
+        gsl_blas_dtrmv (Uplo, TransA, CblasNonUnit, &gsl_A.matrix, &gsl_x.vector);
     }
     """
     
@@ -634,7 +638,7 @@ class dtrsv:
     for (i=0; i<num_x; i++) {
         gsl_A = gsl_matrix_view_array(A+(i*A_offset), nrows, nrows);
         gsl_x = gsl_vector_view_array(x+(i*x_offset), vec_len);
-        gsl_blas_dtrsv (Uplo, Trans_A, CblasNonUnit, &gsl_A.matrix, &gsl_x.vector);
+        gsl_blas_dtrsv (Uplo, TransA, CblasNonUnit, &gsl_A.matrix, &gsl_x.vector);
     }
     """
     
@@ -889,7 +893,7 @@ class dsymm:
     alpha_offset = !(num_alpha==1);
     beta_offset = !(num_beta==1);
     
-    Side = std::tolower(SIDE)=='l'?CblasLeft:CblasRight;
+    Side = std::tolower(SIDE[0])=='l'?CblasLeft:CblasRight;
     Uplo = std::tolower(UPLO[0])=='l'?CblasLower:CblasUpper;
     
     #pragma omp parallel private(i, tid)
@@ -1056,10 +1060,10 @@ class dgetrs:
         gsl_b = gsl_vector_view_array(b+(i*b_offset), LU_rows);
         gsl_x = gsl_vector_view_array(x+(i*x_offset), LU_rows);
         if (!COPY_IPIV)
-            p->data = ipiv+(i*ipiv_offset);
+            p->data = (size_t*)(ipiv+(i*ipiv_offset));
         else
-            for (j=0; j<A_rows; j++)
-                p->data[j] = ipiv[i*A_rows+j];
+            for (j=0; j<LU_rows; j++)
+                p->data[j] = ipiv[i*ipiv_offset+j];
         gsl_linalg_LU_solve (&gsl_LU.matrix, p, &gsl_b.vector, &gsl_x.vector);
         //for (int j=0; j<LU_rows; j++)
         //    std::cout << "p["<<j<<"]=" << p->data[j] << "  ipiv["<<j<<"]="<<ipiv[i*ipiv_offset+j] << std::endl;
@@ -1105,7 +1109,7 @@ class dgetrsx:
         gsl_LU = gsl_matrix_view_array(LU+(i*LU_offset), LU_rows, LU_rows);
         gsl_x = gsl_vector_view_array(x+(i*x_offset), LU_rows);
         if (!COPY_IPIV)
-            p->data = ipiv+(i*ipiv_offset);
+            p->data = (size_t*)(ipiv+(i*ipiv_offset));
         else
             for (j=0; j<LU_rows; j++)
                 p->data[j] = ipiv[i*LU_rows+j];
@@ -1141,7 +1145,7 @@ class dgetri:
     LU_offset = LU_rows*LU_rows;
     ipiv_offset = LU_rows;
     
-    #pragma omp parallel shared(LU_rows, num_x, LU, LU_offset, x, x_offset, COPY_IPIV, ipiv, ipiv_offset) private(p, p_data, i, gsl_LU, gsl_x, j)
+    #pragma omp parallel shared(LU_rows, LU, LU_offset, COPY_IPIV, ipiv, ipiv_offset) private(p, p_data, i, gsl_LU, j)
     {
     p = gsl_permutation_alloc (LU_rows);
     p_data = p->data;
@@ -1151,7 +1155,7 @@ class dgetri:
         gsl_LU = gsl_matrix_view_array(LU+(i*LU_offset), LU_rows, LU_rows);
         gsl_invA = gsl_matrix_view_array(invA+(i*LU_offset), LU_rows, LU_rows);
         if (!COPY_IPIV)
-            p->data = ipiv+(i*ipiv_offset);
+            p->data = (size_t*)(ipiv+(i*ipiv_offset));
         else
             for (j=0; j<LU_rows; j++)
                 p->data[j] = ipiv[i*LU_rows+j];
@@ -1186,7 +1190,7 @@ class dgetrdet:
     for (i=0; i<num_LU; i++) {
         gsl_LU = gsl_matrix_view_array(LU+(i*LU_offset), LU_rows, LU_rows);
         s = signum[i];
-        gsl_linalg_LU_det (&gsl_LU.matrix, s)
+        gsl_linalg_LU_det (&gsl_LU.matrix, s);
     }
     """
 
@@ -1261,8 +1265,8 @@ class dpotrsx:
     gsl_matrix_view gsl_cholA;
     gsl_vector_view gsl_x;
     
-    num_A = NA[0];
-    A_rows = NA[1];
+    num_A = NcholA[0];
+    A_rows = NcholA[1];
     A_offset = num_A==1?0:A_rows*A_rows;
     
     num_x = Nx[0];

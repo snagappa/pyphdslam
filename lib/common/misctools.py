@@ -22,7 +22,7 @@
 #       
 #      
 
-import blas_tools as blas
+import blas
 import numpy as np
 from scipy import weave
 

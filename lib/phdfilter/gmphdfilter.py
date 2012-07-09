@@ -24,11 +24,10 @@
 
 import numpy as np
 from phdfilter import PHD, fn_params, PARAMETERS
-import phdmisctools
 #import copy
 import collections
-import blas_tools as blas
-import misctools
+from lib.common import blas
+from lib.common import misctools
 
 #def placeholder():
 #    return (lambda:0)
@@ -426,69 +425,6 @@ def kalman_predict(x, P, F, Q):
     
     return x_pred, P_pred
 
-
-def kalman_update(x, P, H, R, z=None, USE_NP=1):
-    num_x = len(x)
-    if len(H) == 1:
-        h_idx = [0]*num_x
-    else:
-        h_idx = range(num_x)
-    if len(R) == 1:
-        r_idx = [0]*num_x
-    else:
-        r_idx = range(num_x)
-        
-    kalman_info = lambda:0
-    # Evaluate inverse and determinant using Cholesky decomposition
-    if USE_NP:
-        sqrt_S = [np.linalg.cholesky(H[h_idx[i]]*P[i]*H[h_idx[i]].T + 
-                                            R[r_idx[i]]) for i in range(num_x)]
-        inv_sqrt_S = [sqrt_S[i].getI() for i in range(num_x)]
-        inv_S = [inv_sqrt_S[i].T*inv_sqrt_S[i] for i in range(num_x)]
-    else:
-        _intermediate_sum = [H[h_idx[i]]*P[i]*H[h_idx[i]].T + 
-                                             R[r_idx[i]] for i in range(num_x)]
-        sqrt_S = phdmisctools.batch_cholesky(_intermediate_sum)
-        inv_sqrt_S = phdmisctools.inverse(sqrt_S)
-        inv_S = [np.dot(np.fliplr(np.rot90(inv_sqrt_S[i], -1)), 
-                                          inv_sqrt_S[i]) for i in range(num_x)]
-    
-    det_S = [np.diag(sqrt_S[i]).prod()**2 for i in range(num_x)]
-    
-    # Kalman gain
-    kalman_gain = [P[i]*H[h_idx[i]].T*inv_S[i] for i in range(num_x)]
-    
-    # Predicted observations
-    pred_z = [np.dot(H[h_idx[i]], x[i]).A[0] for i in range(num_x)]
-    
-    # Update to new state if observations were received
-    if not (z is None):
-        residuals, num_residuals = phdmisctools._compute_residuals_(z, pred_z)
-        #[z - pred_z[i] for i in range(num_x)]
-        x_upd = [x[i] + np.dot(kalman_gain[i], residuals[i]).A[0] 
-                 for i in range(num_x)]
-    else:
-        x_upd = x
-        
-    # Update covariance
-    P_upd = [P[i] - (kalman_gain[i]*H[h_idx[i]]*P[i]) for i in range(num_x)]
-    
-    kalman_info.inv_sqrt_S = inv_sqrt_S
-    kalman_info.det_S = det_S
-    kalman_info.pred_z = pred_z
-    kalman_info.kalman_gain = kalman_gain
-    
-    return x_upd, P_upd, kalman_info
-    
-
-def kalman_update_x(x, zhat, z, kalman_gain):
-    num_x = len(x)
-    residuals, num_residuals = phdmisctools._compute_residuals_(z, zhat)
-    #residuals = [z - zhat[i] for i in range(num_x)]
-    x_upd = [x[i] + np.dot(kalman_gain[i], residuals[i]).A[0] 
-            for i in range(num_x)]
-    return x_upd, residuals
-    
 
 def markov_predict(state, parameters):
     x_pred, P_pred = kalman_predict(state.state(), state.covariance(), 

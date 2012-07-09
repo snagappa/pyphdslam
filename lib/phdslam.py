@@ -23,11 +23,11 @@
 #       
 
 
-import gmphdfilter
-from phdfilter import PARAMETERS
+from phdfilter import gmphdfilter
+from phdfilter.phdfilter import PARAMETERS
 import numpy as np
-import misctools
-import blas_tools as blas
+from common import misctools
+from common import blas
 import code
 
 #def placeholder():
