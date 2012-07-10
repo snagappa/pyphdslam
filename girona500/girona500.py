@@ -29,14 +29,16 @@ g500_navigation module.
 """
 
 import collections
+from lib.common import misctools, blas
+blas.SET_DEBUG(False)
 from lib.phdfilter.phdfilter import fn_params, PARAMETERS
 from lib.phdfilter import gmphdfilter
 from lib import phdslam
 import numpy as np
-from lib.common import misctools, blas
+
 import rospy
 import code
-from lib.phdfilter.gmphdfilter import blas_kf_update
+from lib.common.kalmanfilter import kf_update, kf_predict_cov
 
 SLAM_FN_DEFS = collections.namedtuple("SLAM_FN_DEFS", 
                 "state_markov_predict_fn state_obs_fn state_likelihood_fn \
@@ -57,6 +59,8 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         # Force the state space to 6: x, y, z, vx, vy, vz
         # roll, pitch yaw + velocities must be fed from parent
         state_parameters["ndims"] = 6
+        state_parameters["nparticles"] = 2*state_parameters["ndims"] + 1
+        
         super(G500_PHDSLAM, self).__init__(
                             state_markov_predict_fn, state_obs_fn,
                             state_likelihood_fn, state__state_update_fn,
@@ -122,6 +126,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         return trans_mat, sc_process_noise
     
     def predict(self, ctrl_input, predict_to_time):
+        USE_KF = True
         if self.last_odo_predict_time==0:
             self.last_odo_predict_time = predict_to_time
             return
@@ -135,10 +140,14 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         pred_states = blas.dgemv(trans_mat, self.states)
         nparticles = self.parameters.state_parameters["nparticles"]
         ndims = self.parameters.state_parameters["ndims"]
-        pred_states += np.random.multivariate_normal(mean=np.zeros(ndims, dtype=float),
-                                                  cov=sc_process_noise, 
-                                                  size=(nparticles))
+        if not USE_KF:
+            pred_states += np.random.multivariate_normal(mean=np.zeros(ndims, dtype=float),
+                                                         cov=sc_process_noise, 
+                                                         size=(nparticles))
         self.states = pred_states
+        self.covariances = kf_predict_cov(self.covariances, trans_mat, 
+                                          sc_process_noise)
+        
         states_xyz = np.array(pred_states[:,0:3])
         # Copy the predicted states to the "parent state" attribute and 
         # perform a prediction for the map
@@ -164,22 +173,44 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         
     
     def update_gps(self, gps_obs):
-        pred_gps_obs = np.array(self.states[:, 0:2])
-        likelihood = misctools.mvnpdf(np.array([gps_obs]), pred_gps_obs, 
-                np.array([self.parameters.state_likelihood_fn.parameters.gps_obs_noise]))
-        self.weights *= likelihood
-        self.weights /= self.weights.sum()
+        USE_KF = True
+        if USE_KF == True:
+            obs_matrix = np.array([np.hstack(( np.eye(2), np.zeros((4,4)) ))])
+            obs_noise = np.array([self.parameters.state_likelihood_fn.parameters.gps_obs_noise])
+            upd_weights, upd_states, upd_covs = \
+                    g500_kf_update(self.weights, self.states, self.covariances,
+                                   obs_matrix, obs_noise, gps_obs)
+            self.weights = upd_weights
+            self.states = upd_states
+            self.covariances = upd_covs
+        else:
+            pred_gps_obs = np.array(self.states[:, 0:2])
+            likelihood = misctools.mvnpdf(np.array([gps_obs]), pred_gps_obs, 
+                    np.array([self.parameters.state_likelihood_fn.parameters.gps_obs_noise]))
+            self.weights *= likelihood
+            self.weights /= self.weights.sum()
     
     def update_dvl(self, dvl_obs):
-        pred_dvl_obs = np.array(self.states[:, 3:])
-        npa_dvl_obs = np.array([dvl_obs])
-        cov = np.array([self.parameters.state_likelihood_fn.parameters.dvl_obs_noise])
-        loglikelihood = np.log(misctools.mvnpdf(npa_dvl_obs, pred_dvl_obs, cov) +
-                            np.finfo(np.double).tiny)
-        loglikelihood -= max(loglikelihood)
-        likelihood = np.exp(loglikelihood)
-        self.weights *= likelihood
-        self.weights /= self.weights.sum()
+        USE_KF = True
+        if USE_KF:
+            obs_matrix = np.array([np.hstack(( np.zeros((3,3)), np.eye(3) ))])
+            obs_noise = np.array([self.parameters.state_likelihood_fn.parameters.dvl_obs_noise])
+            upd_weights, upd_states, upd_covs = \
+                    g500_kf_update(self.weights, self.states, self.covariances,
+                                   obs_matrix, obs_noise, dvl_obs)
+            self.weights = upd_weights
+            self.states = upd_states
+            self.covariances = upd_covs
+        else:
+            pred_dvl_obs = np.array(self.states[:, 3:])
+            npa_dvl_obs = np.array([dvl_obs])
+            cov = np.array([self.parameters.state_likelihood_fn.parameters.dvl_obs_noise])
+            loglikelihood = np.log(misctools.mvnpdf(npa_dvl_obs, pred_dvl_obs, cov) +
+                                np.finfo(np.double).eps)
+            loglikelihood -= max(loglikelihood)
+            likelihood = np.exp(loglikelihood)
+            self.weights *= likelihood
+            self.weights /= self.weights.sum()
         
     def update_svs(self, svs_obs):
         OVERWRITE_DEPTH = True
@@ -192,7 +223,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
             loglikelihood = np.log(misctools.mvnpdf(np.array([[svs_obs]]), 
                                                     pred_svs_obs, 
                                                     np.array([[[0.2]]])) +
-                                   np.finfo(np.double).tiny)
+                                   np.finfo(np.double).eps)
             loglikelihood -= max(loglikelihood)
             likelihood = np.exp(loglikelihood)
             self.weights *= likelihood
@@ -283,7 +314,7 @@ def g500_kf_update(weights, states, covs, obs_matrix, obs_noise, z):
         this_cov = covs[count]
         this_cov.shape = (1,) + this_cov.shape
         (upd_state, upd_covariance, kalman_info) = \
-                blas_kf_update(this_state, this_cov, obs_matrix, obs_noise, z, False)
+                kf_update(this_state, this_cov, obs_matrix, obs_noise, z, False)
         #x_pdf = misctools.mvnpdf(x, mu, sigma)
         x_pdf = np.exp(-0.5*np.power(
                 blas.dgemv(kalman_info.inv_sqrt_S, kalman_info.residuals), 2).sum(axis=1))/ \
@@ -329,9 +360,9 @@ def g500_slam_fn_defs():
     # that the information from the imu is perfect
     # We only need to estimate x,y,z. The roll, pitch and yaw must be fed
     # externally
-    state_parameters = {"nparticles":100,
+    state_parameters = {"nparticles":32,
                         "ndims":6,
-                        "resample_threshold":0.95}
+                        "resample_threshold":-1}
     
     
     # Parameters for the PHD filter

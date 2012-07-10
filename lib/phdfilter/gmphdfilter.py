@@ -28,6 +28,7 @@ from phdfilter import PHD, fn_params, PARAMETERS
 import collections
 from lib.common import blas
 from lib.common import misctools
+from lib.common import kalmanfilter
 
 #def placeholder():
 #    return (lambda:0)
@@ -174,7 +175,7 @@ class GMPHD(PHD):
         P = detected_states.covariance
         
         # Part of the Kalman update is common to all observation-updates
-        x, P, kalman_info = blas_kf_update(x, P, 
+        x, P, kalman_info = kalmanfilter.kf_update(x, P, 
                             np.array([self.parameters.obs_fn.parameters.H]), 
                             np.array([self.parameters.obs_fn.parameters.R]), 
                             None, INPLACE=True)#USE_NP=0)
@@ -189,7 +190,7 @@ class GMPHD(PHD):
             #new_x = copy.deepcopy(x)
             # Apply the Kalman update to get the new state - update in-place
             # and return the residuals
-            new_x, residuals = blas_kf_update_x(x, kalman_info.pred_z, 
+            new_x, residuals = kalmanfilter.kf_update_x(x, kalman_info.pred_z, 
                                         _observation_, kalman_info.kalman_gain,
                                         INPLACE=False)
             
@@ -319,127 +320,12 @@ class GMPHD(PHD):
     
     
 ##############################################################################
-def blas_kf_predict(state, covariance, F, Q, B=None, u=None):
-    pred_state = blas.dgemv(F, state)
-    if (not B==None) and (not u==None):
-        blas.dgemv(B, u, y=pred_state)
-    # Repeat Q n times and return as the predicted covariance
-    Q = np.repeat(np.array([Q]), state.shape[0], 0)
-    blas.dgemm(F, blas.dgemm(covariance, F, TRANSPOSE_B=True), C=Q)
-    return pred_state, Q
-    
-
-def blas_kf_update(state, covariance, H, R, z=None, INPLACE=True):
-    kalman_info = lambda:0
-    assert z == None or len(z.shape) == 1, "z must be a single observations, \
-    not an array of observations"
-    
-    if INPLACE:
-        upd_state = state
-        upd_covariance = covariance
-        covariance_copy = covariance.copy()
-    else:
-        upd_state = state.copy()
-        upd_covariance = covariance.copy()
-        covariance_copy = covariance
-    
-    # Store R
-    chol_S = np.repeat(R, state.shape[0], 0)
-    # Compute PH^T
-    p_ht = blas.dgemm(covariance, H, TRANSPOSE_B=True)
-    # Compute HPH^T + R
-    blas.dgemm(H, p_ht, C=chol_S)
-    # Compute the Cholesky decomposition
-    blas.dpotrf(chol_S, True)
-    # Compute the determinant
-    diag_vec = np.array([np.diag(chol_S[i]) for i in range(chol_S.shape[0])])
-    det_S = diag_vec.prod(1)**2
-    # Compute the inverse of the square root
-    inv_sqrt_S = blas.dtrtri(chol_S, 'l')
-    # Compute the inverse using dsyrk
-    inv_S = blas.dsyrk('l', inv_sqrt_S, TRANSPOSE_A=True)
-    # Symmetrise the matrix since only the lower triangle is stored
-    blas.symmetrise(inv_S, 'l')
-    #blas.dpotri(op_S, True)
-    # inv_S = op_S
-    
-    # Kalman gain
-    kalman_gain = blas.dgemm(p_ht, inv_S)
-    
-    # Observation from current state
-    pred_z = blas.dgemv(H, state)
-    if not (z==None):
-        upd_state, residuals = blas_kf_update_x(upd_state, pred_z, z, kalman_gain, INPLACE=True)
-        #residuals = np.repeat(z, pred_z.shape[0], 0)
-        #blas.daxpy(-1, pred_z, residuals)
-        ## Update the state
-        #blas.dgemv(kalman_gain, residuals, y=upd_state)
-    else:
-        residuals = np.empty(0)
-    
-    # Update the covariance
-    k_h = blas.dgemm(kalman_gain, H)
-    blas.dgemm(k_h, covariance_copy, alpha=-1.0, C=upd_covariance)
-    
-    kalman_info.inv_sqrt_S = inv_sqrt_S
-    kalman_info.det_S = det_S
-    kalman_info.pred_z = pred_z
-    kalman_info.kalman_gain = kalman_gain
-    kalman_info.residuals = residuals
-    
-    return upd_state, upd_covariance, kalman_info
-    
-    
-def blas_kf_update_x(x, pred_z, z, kalman_gain, INPLACE=True):
-    assert z == None or len(z.shape) == 1, "z must be a single observations, \
-    not an array of observations"
-    if INPLACE:
-        upd_state = x.copy()
-    else:
-        upd_state = x
-    
-    residuals = np.repeat([z], pred_z.shape[0], 0)
-    blas.daxpy(-1, pred_z, residuals)
-    # Update the state
-    blas.dgemv(kalman_gain, residuals, y=upd_state)
-    
-    return upd_state, residuals
-    
-    
-def kalman_predict(x, P, F, Q):
-    num_x = len(x)
-    if len(F) == 1:
-        f_idx = [0]*num_x
-    else:
-        f_idx = range(num_x)
-    if len(Q) == 1:
-        q_idx = [0]*num_x
-    else:
-        q_idx = range(num_x)
-        
-    # Predict state
-    x_pred = [np.dot(F[f_idx[i]], x[i]).A[0] for i in range(num_x)]
-    
-    # Predict covariance
-    P_pred = [F[f_idx[i]]*P[i]*F[f_idx[i]].T+Q[q_idx[i]] for i in range(num_x)]
-    
-    return x_pred, P_pred
-
 
 def markov_predict(state, parameters):
-    x_pred, P_pred = kalman_predict(state.state(), state.covariance(), 
-                                    np.array([parameters.F]),
-                                    np.array([parameters.Q]))
+    x_pred, P_pred = kalmanfilter.kf_predict(state.state(), state.covariance(), 
+                                             np.array([parameters.F]),
+                                             np.array([parameters.Q]))
     state.set(x_pred, P_pred)
-    return state
-    
-    
-def __markov_predict(state, parameters):
-    num_x = len(state)
-    x = [jointstate[0] for jointstate in state]
-    P = [jointstate[1] for jointstate in state]
-    x_pred, P_pred = kalman_predict(x, P, parameters.F, parameters.Q)
-    state = [[x_pred[i], P_pred[i]] for i in range(num_x)]
     return state
     
     

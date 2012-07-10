@@ -44,6 +44,11 @@ V_V_DIM_MISMATCH = "  *Vectors have incompatible dimensions*  "
 M_V_DIM_MISMATCH = "  *Matrix and vector have incompatible dimensions*  "
 M_M_DIM_MISMATCH = "  *Matrices have incompatible dimensions*  "
 
+def SET_DEBUG(bool_value):
+    DEBUG = bool_value
+    if not DEBUG:
+        print "Warning, blas debugging is disabled."
+    return
 
 def blas_weaver(subroutine_string):
     subroutine = getattr(__c_code__, subroutine_string)
@@ -1147,9 +1152,9 @@ def test_dposv(num_elements=1000, num_dims=4, num_rows=4):
     pass
 
 print "Initialising..."
-A = np.random.rand(1, 2, 2) + np.eye(2)
-B = np.random.rand(1, 2, 2) + np.eye(2)
-C = np.random.rand(1, 2, 2) + np.eye(2)
+A = np.random.rand(1, 2, 2) + 10*np.eye(2)
+B = np.random.rand(1, 2, 2) + 10*np.eye(2)
+C = np.random.rand(1, 2, 2) + 10*np.eye(2)
 x = np.random.rand(1, 2)
 y = np.random.rand(1, 2)
 UPLO = 'l'
