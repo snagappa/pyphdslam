@@ -156,6 +156,7 @@ class ddot:
         return python_vars, code, support_code, libs
     support_code = f77_blas_headers+omp_headers
     libraries = lptf77blas+lgomp
+    extra_compile_args = []
     python_vars = ["x", "y","xt_dot_y"]
     code = """
     int i, num_x, num_y, max_num;
@@ -199,6 +200,7 @@ class dnrm2:
         return python_vars, code, support_code, libs
     support_code = f77_blas_headers+omp_headers
     libraries = lptf77blas+lgomp
+    extra_compile_args = []
     python_vars = ["x", "nrm2"]
     code = """
     int i, num_x;
@@ -232,6 +234,7 @@ class dasum:
         return python_vars, code, support_code, libs
     support_code = f77_blas_headers+omp_headers
     libraries = lptf77blas+lgomp
+    extra_compile_args = []
     python_vars = ["x", "asum"]
     code = """
     int i, num_x;
@@ -264,6 +267,7 @@ class idamax:
         return python_vars, code, support_code, libs
     support_code = f77_blas_headers+omp_headers
     libraries = lptf77blas+lgomp
+    extra_compile_args = []
     python_vars = ["x", "max_idx"]
     code = """
     int i, num_x;
@@ -296,6 +300,7 @@ class daxpy:
         return python_vars, code, support_code, libs
     support_code = f77_blas_headers+omp_headers
     libraries = lptf77blas+lgomp
+    extra_compile_args = []
     python_vars = ["alpha", "x", "y"]
     code = """
     int i, num_x, num_alpha, num_y;
@@ -334,6 +339,7 @@ class dscal:
         return python_vars, code, support_code, libs
     support_code = f77_blas_headers+omp_headers
     libraries = lptf77blas+lgomp
+    extra_compile_args = []
     python_vars = ["alpha", "x"]
     code = """
     int i, num_x, num_alpha;
@@ -368,6 +374,7 @@ class dcopy:
         return python_vars, code, support_code, libs
     support_code = f77_blas_headers+omp_headers
     libraries = lptf77blas+lgomp
+    extra_compile_args = []
     python_vars = ["x", "y"]
     code = """
     int nthreads, tid;
@@ -401,6 +408,7 @@ class _dcopy_:
         return python_vars, code, support_code, libs
     support_code = f77_blas_headers+omp_headers
     libraries = lptf77blas+lgomp
+    extra_compile_args = []
     python_vars = ["x", "y", "vec_len", "x_offset", "y_offset"]
     code = """
     dcopy_(&vec_len, x+x_offset, 1, y+y_offset, 1);
@@ -421,6 +429,7 @@ class dgemv:
         return python_vars, code, support_code, libs
     support_code = gsl_blas_headers+omp_headers
     libraries = lptf77blas+llapack+lgomp+lgsl
+    extra_compile_args = []
     python_vars = ["A", "x", "y", "alpha", "beta", "TRANSPOSE_A"]
     code = """
     int i, num_A, num_x, num_alpha, num_beta, num_y;
@@ -556,6 +565,7 @@ class dtrmv:
         return python_vars, code, support_code, libs
     support_code = gsl_blas_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["A", "x", "UPLO", "TRANSPOSE_A"]
     code = """
     int i, num_A, num_x;
@@ -603,6 +613,7 @@ class dtrsv:
         return python_vars, code, support_code, libs
     support_code = gsl_blas_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["A", "x", "UPLO", "TRANSPOSE_A"]
     code = """
     int i, num_A, num_x;
@@ -650,6 +661,7 @@ class dsymv:
         return python_vars, code, support_code, libs
     support_code = gsl_blas_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["alpha", "A", "x", "beta", "y", "UPLO"]
     code = """
     int i, num_alpha, num_A, num_x, num_beta, num_y;
@@ -704,6 +716,7 @@ class dger:
         return python_vars, code, support_code, libs
     support_code = gsl_blas_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["A", "x", "y", "alpha"]
     code = """
     // A is stored in row major order and there is no option to transpose so we 
@@ -760,6 +773,7 @@ class dsyr:
         return python_vars, code, support_code, libs
     support_code = gsl_blas_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["A", "x", "alpha", "UPLO"]
     code = """
     int i, num_x, num_A, num_alpha;
@@ -818,6 +832,7 @@ class dgemm:
         return python_vars, code, support_code, libs
     support_code = gsl_blas_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["A", "B", "C", "alpha", "beta", "TRANSPOSE_A", "TRANSPOSE_B"]
     code = """
     int i, num_A, num_B, num_C, num_alpha, num_beta;
@@ -871,6 +886,7 @@ class dsymm:
         return python_vars, code, support_code, libs
     support_code = gsl_blas_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["A", "B", "C", "alpha", "beta", "SIDE", "UPLO"]
     code = """
     int i, num_A, num_B, num_C, num_alpha, num_beta;
@@ -926,6 +942,7 @@ class dsyrk:
         return python_vars, code, support_code, libs
     support_code = gsl_blas_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["A", "alpha", "C", "beta", "TRANSPOSE_A", "UPLO"]
     code = """
     int i, num_A, num_C, num_alpha, num_beta;
@@ -982,6 +999,7 @@ class dgetrf:
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["A", "ipiv", "signum"]
     code = """
     int i, j, num_A;
@@ -1027,6 +1045,7 @@ class dgetrs:
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["LU", "ipiv", "b", "x"]
     code = """
     int i, j, num_LU, num_b, num_x;
@@ -1080,6 +1099,7 @@ class dgetrsx:
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["LU", "ipiv", "x"]
     code = """
     int i, j, num_LU, num_x;
@@ -1129,6 +1149,7 @@ class dgetri:
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["LU", "ipiv", "invA"]
     code = """
     int i, j, num_LU;
@@ -1175,6 +1196,7 @@ class dgetrdet:
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["LU", "signum", "det_vec"]
     code = """
     int i, j, num_LU;
@@ -1202,6 +1224,7 @@ class dpotrf:
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["A"]
     code = """
     int i, num_A;
@@ -1226,6 +1249,7 @@ class dpotrs:
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["cholA", "b", "x"]
     code = """
     int i, num_A, num_b, num_x;
@@ -1258,6 +1282,7 @@ class dpotrsx:
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["cholA", "x"]
     code = """
     int i, num_A, num_x;
@@ -1287,6 +1312,7 @@ class dpotri:
         return python_vars, code, support_code, libs
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
+    extra_compile_args = []
     python_vars = ["A"]
     code = """
     int i, j, num_A;
@@ -1311,6 +1337,7 @@ class dtrtri:
         return python_vars, code, support_code, libs
     support_code = omp_headers+gsl_blas_headers
     libraries = lptf77blas+lgomp+llapack+lgsl + ["cblas"]
+    extra_compile_args = []
     python_vars = ["A"]
     code = """
     int i, j, num_A;
@@ -1351,6 +1378,7 @@ class symmetrise:
     """
     support_code = omp_headers+helper_code+gsl_blas_headers
     libraries = lgomp+lgsl
+    extra_compile_args = []
     python_vars = ["A", "UPLO"]
     code = """
     int i, num_A, tid, nthreads;
@@ -1391,6 +1419,7 @@ class ldgemv:
         return python_vars, code, support_code, libs
     support_code = f77_blas_headers
     libraries = ["blas", "atlas", "lapack"]
+    extra_compile_args = []
     python_vars = ["A", "x", "y", "A_shape", "x_shape", "alpha", "beta", "TRANSPOSE_A"]
     code = """
     int i, j, k, inc;
@@ -1465,6 +1494,7 @@ class npdgemv_old_plus_broken_code_now:
         return python_vars, code, support_code, libs
     support_code = f77_blas_headers
     libraries = ["blas", "lapack"]
+    extra_compile_args = []
     python_vars = ["A", "x", "y", "alpha", "beta", "TRANSPOSE_A", "C_CONTIGUOUS"]
     code = """
     int i, j, k, base_offset, inc;

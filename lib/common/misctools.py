@@ -25,7 +25,8 @@
 import blas
 import numpy as np
 from scipy import weave
-
+from operator import mul, add
+import code
 
 def mahalanobis(x, P, y):
     """
@@ -90,10 +91,15 @@ def get_resample_index(weights, nparticles=-1):
     
 def mvnpdf(x, mu, sigma):
     # Compute the residuals
-    residual = x.copy()
-    if residual.shape[0] == 1:
-        residual = np.repeat(residual, mu.shape[0], 0)
+    if x.shape[0] == 1:
+        residual = np.repeat(x, mu.shape[0], 0)
+    else:
+        residual = x.copy()
     blas.daxpy(-1.0, mu, residual)
+    
+    #if x.shape[0] == 1:
+    #    x = np.repeat(x, mu.shape[0], 0)
+    #residual = x-mu
     chol_sigma = blas.dpotrf(sigma)
     # Compute the determinant
     diag_vec = np.array([np.diag(chol_sigma[i]) 
@@ -115,20 +121,25 @@ def mvnpdf(x, mu, sigma):
     return pdf
     
     
-def sample_mn_cv(x, wt=None):
+def sample_mn_cv(x, wt=None, SYMMETRISE=False):
     if wt==None:
         wt = 1.0/x.shape[0]*np.ones(x.shape[0])
     else:
         wt /= wt.sum()
     
-    mean_x = x.copy()
+    #mean_x = x.copy()
     # Scale the state by the associated weight
-    blas.dscal(wt, mean_x)
+    #blas.dscal(wt, mean_x)
     # and take the sum
-    mean_x = mean_x.sum(axis=0)
+    #mean_x = mean_x.sum(axis=0)
     
-    residuals = x.copy()
-    blas.daxpy(-1.0, np.array([mean_x]), residuals)
+    #residuals = x.copy()
+    #blas.daxpy(-1.0, np.array([mean_x]), residuals)
+    
+    #mean_x = np.apply_along_axis(mul, 0, x, wt).sum(axis=0)
+    mean_x = (wt[:,np.newaxis]*x).sum(axis=0)
+    residuals = x - mean_x
     cov_x = np.array([blas.dsyr('l', residuals, wt).sum(axis=0)/(1-(wt**2).sum())])
-    blas.symmetrise(cov_x, 'l')
+    if SYMMETRISE:
+        blas.symmetrise(cov_x, 'l')
     return mean_x, cov_x[0]

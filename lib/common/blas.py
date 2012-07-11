@@ -50,6 +50,12 @@ def SET_DEBUG(bool_value):
         print "Warning, blas debugging is disabled."
     return
 
+__blas_fns_list__ = ["ddot", "dnrm2", "dasum", "idamax", "daxpy", "dscal", 
+                     "dcopy", "dgemv", "dtrmv", "dtrsv", "dsymv", "dger", 
+                     "dsyr", "dgemm", "dsymm", "dsyrk", "dgetrf", "dgetrs", 
+                     "dgetrsx", "dgetri", "dgetrdet", "dpotrf", "dpotrs", 
+                     "dpotrsx", "dpotri", "dtrtri", "symmetrise"]
+
 def blas_weaver(subroutine_string):
     subroutine = getattr(__c_code__, subroutine_string)
     compile_args = getattr(__c_code__, "EXTRA_COMPILE_ARGS", [])
@@ -58,7 +64,12 @@ def blas_weaver(subroutine_string):
     fn_string = "__c_code__."+subroutine_string
     exec_string = "weave.inline(" + fn_string + ".code, " + fn_string+".python_vars" + ", libraries=" + fn_string + ".libraries" + ", support_code=" + fn_string + ".support_code" + ", extra_compile_args=" + str(compile_args) + ")"
     return exec_string
-                 
+
+blas_exec_cmd = dict()                 
+for blas_fn in __blas_fns_list__:
+    blas_exec_cmd[blas_fn] = blas_weaver(blas_fn)
+del blas_fn
+
 
 global_support_code = """
 #include <atlas/cblas.h>
@@ -262,7 +273,7 @@ def ddot(x, y):
         assert (x.shape[0] in [1, y.shape[0]]) and (y.shape[0] in [1, x.shape[0]]), NUM_ELEM_MISMATCH
         assert (x.shape[1] == y.shape[1]), V_V_DIM_MISMATCH
     xt_dot_y = np.zeros(max([x.shape[0], y.shape[0]]), dtype=float)
-    exec blas_weaver("ddot")
+    exec blas_exec_cmd["ddot"]
     return xt_dot_y
     
     
@@ -274,7 +285,7 @@ def dnrm2(x):
         assert_valid_vector(x, "x")
     
     nrm2 = np.zeros(x.shape[0], dtype=float)
-    exec blas_weaver("dnrm2")
+    exec blas_exec_cmd["dnrm2"]
     return nrm2
 
 
@@ -286,7 +297,7 @@ def dasum(x):
         assert_valid_vector(x)
     
     asum = np.zeros(x.shape[0], dtype=float)
-    exec blas_weaver("dasum")
+    exec blas_exec_cmd["dasum"]
     return asum
     
     
@@ -298,7 +309,7 @@ def idamax(x):
         assert_valid_vector(x, "x")
     
     max_idx = np.empty(x.shape[0], dtype=int)
-    exec blas_weaver("idamax")
+    exec blas_exec_cmd["idamax"]
     return max_idx
     
     
@@ -325,7 +336,7 @@ def daxpy(alpha, x, y=None):
     if DEBUG:
         assert alpha.shape[0] in [1, x.shape[0]], V_V_DIM_MISMATCH
     
-    exec blas_weaver("daxpy")
+    exec blas_exec_cmd["daxpy"]
     return fn_return_val
     
     
@@ -342,7 +353,7 @@ def dscal(alpha, x):
     if DEBUG:
         assert len(alpha) in (1, x.shape[0]), V_V_DIM_MISMATCH
     
-    exec blas_weaver("dscal")
+    exec blas_exec_cmd["dscal"]
     
     
 def dcopy(x, y):
@@ -353,7 +364,7 @@ def dcopy(x, y):
         assert_valid_vector(x, "x")
         assert_valid_vector(y, "y")
         assert x.shape==y.shape, NUM_ELEM_MISMATCH+V_V_DIM_MISMATCH
-    exec blas_weaver("dcopy")
+    exec blas_exec_cmd["dcopy"]
     
     
 def _dcopy_(x, y, vec_len=None, x_offset=0, y_offset=0):
@@ -402,7 +413,7 @@ def dgemv(A, x, TRANSPOSE_A=False, alpha=1.0, beta=1.0, y=None):
         else:
             assert A.shape[1] == x.shape[1], M_V_DIM_MISMATCH
         assert len(beta) in [1, y.shape[0]], NUM_ELEM_MISMATCH
-    exec blas_weaver("dgemv")
+    exec blas_exec_cmd["dgemv"]
     return fn_return_val
     
     
@@ -420,7 +431,7 @@ def dtrmv(UPLO, A, x, TRANSPOSE_A=False):
         assert (x.shape[0]==A.shape[0]) or (x.shape[0]==1) or (A.shape[0]==1), NUM_ELEM_MISMATCH
         assert A.shape[2] == x.shape[1], M_V_DIM_MISMATCH
     
-    exec blas_weaver("dtrmv")
+    exec blas_exec_cmd["dtrmv"]
     
 
 def dtrsv(UPLO, A, x, TRANSPOSE_A=False):
@@ -441,7 +452,7 @@ def dtrsv(UPLO, A, x, TRANSPOSE_A=False):
         else:
             assert A.shape[2] == x.shape[1], M_V_DIM_MISMATCH
     
-    exec blas_weaver("dtrsv")
+    exec blas_exec_cmd["dtrsv"]
     
 
 def dsymv(UPLO, A, x, alpha=1.0, beta=1.0, y=None):
@@ -471,7 +482,7 @@ def dsymv(UPLO, A, x, alpha=1.0, beta=1.0, y=None):
         assert A.shape[2] == x.shape[1], M_V_DIM_MISMATCH
         assert len(beta) in [1, y.shape[0]], NUM_ELEM_MISMATCH
     
-    exec blas_weaver("dsymv")
+    exec blas_exec_cmd["dsymv"]
     return fn_return_val
     
     
@@ -501,7 +512,7 @@ def dger(x, y, alpha=1.0, A=None):
         assert len(alpha) in [1, x.shape[0], y.shape[0]], NUM_ELEM_MISMATCH
         assert (x.shape[0]==y.shape[0]) or (x.shape[0]==1) or (y.shape[0]==1), NUM_ELEM_MISMATCH
     
-    exec blas_weaver("dger")
+    exec blas_exec_cmd["dger"]
     return fn_return_val
     
     
@@ -527,7 +538,7 @@ def dsyr(UPLO, x, alpha=1.0, A=None):
         assert len(alpha) in [1, x.shape[0]], NUM_ELEM_MISMATCH
         assert A.shape[1]==A.shape[2]==x.shape[1], M_V_DIM_MISMATCH
     
-    exec blas_weaver("dsyr")
+    exec blas_exec_cmd["dsyr"]
     return fn_return_val
 
 
@@ -577,7 +588,11 @@ def dgemm(A, B, TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, beta=1.0, C=Non
         assert len(alpha) in [1, A.shape[0], B.shape[0]], NUM_ELEM_MISMATCH
         assert len(beta) in [1, C.shape[0]], NUM_ELEM_MISMATCH
     
-    exec blas_weaver("dgemm")
+    exec blas_exec_cmd["dgemm"]
+    #weave.inline(__c_code__.dgemm.code, __c_code__.dgemm.python_vars, 
+    #             libraries=__c_code__.dgemm.libraries, 
+    #             support_code=__c_code__.dgemm.support_code, 
+    #             extra_compile_args=['-O3 -g -fopenmp'])
     return fn_return_val
 
 
@@ -621,7 +636,7 @@ def dsymm(A, B, UPLO, SIDE='l', alpha=1.0, beta=1.0, C=None):
             assert C.shape == (max([A.shape[0], B.shape[0]]), B_dims[0], A_dims[1]), NUM_ELEM_MISMATCH+M_M_DIM_MISMATCH
         assert len(beta) in [1, C.shape[0]], NUM_ELEM_MISMATCH
     
-    exec blas_weaver("dsymm")
+    exec blas_exec_cmd["dsymm"]
     return fn_return_val
 
 
@@ -656,7 +671,7 @@ def dsyrk(UPLO, A, TRANSPOSE_A=False, alpha=1.0, beta=1.0, C=None):
         assert C.shape == (A.shape[0], A_dims[0], A_dims[0]), M_M_DIM_MISMATCH
         assert beta.shape[0] in [1, C.shape[0]], NUM_ELEM_MISMATCH
     
-    exec blas_weaver("dsyrk")
+    exec blas_exec_cmd["dsyrk"]
     return fn_return_val
 
 
@@ -691,7 +706,7 @@ def dgetrf(A, INPLACE=False):
     else:
         fn_return_val = ipiv, signum
     
-    exec blas_weaver("dgetrf")
+    exec blas_exec_cmd["dgetrf"]
     return fn_return_val
 
 
@@ -719,7 +734,7 @@ def dgetrs(LU, ipiv, b, x=None):
         assert_valid_vector(x, "x")
         assert x.shape == (max([LU.shape[0], b.shape[0]]), b.shape[1]), NUM_ELEM_MISMATCH+V_V_DIM_MISMATCH
     
-    exec blas_weaver("dgetrs")
+    exec blas_exec_cmd["dgetrs"]
     return fn_return_val
 
 
@@ -739,7 +754,7 @@ def dgetrsx(LU, ipiv, b):
         assert LU.shape[0] in [1, b.shape[0]], NUM_ELEM_MISMATCH
         assert LU.shape[2] == b.shape[1], M_V_DIM_MISMATCH
     
-    exec blas_weaver("dgetrsx")
+    exec blas_exec_cmd["dgetrsx"]
     
 
 def dgetri(LU, ipiv):
@@ -753,7 +768,7 @@ def dgetri(LU, ipiv):
         assert LU.shape[0] == ipiv.shape[0], NUM_ELEM_MISMATCH
         assert LU.shape[1] == ipiv.shape[1], M_M_DIM_MISMATCH
     invA = np.zeros(LU.shape, dtype=float)
-    exec blas_weaver("dgetri")
+    exec blas_exec_cmd["dgetri"]
     return invA
 
 
@@ -790,7 +805,7 @@ def dgetrdet(LU, signum):
         assert_valid_matrix(LU)
         assert signum.shape[0] == LU.shape[0], NUM_ELEM_MISMATCH
     det_vec = np.zeros(LU.shape[0])
-    exec blas_weaver("dgetrdet")
+    exec blas_exec_cmd["dgetrdet"]
     return det_vec
     
     
@@ -809,7 +824,7 @@ def dpotrf(A, INPLACE=False):
     if not INPLACE:
         A = A.copy()
         fn_return_val = A
-    exec blas_weaver("dpotrf")
+    exec blas_exec_cmd["dpotrf"]
     return fn_return_val
 
 
@@ -834,7 +849,7 @@ def dpotrs(cholA, b, x=None):
         assert_valid_vector(x, "x")
         assert x.shape == (max([cholA.shape[0], b.shape[0]]), b.shape[1]), NUM_ELEM_MISMATCH+V_V_DIM_MISMATCH
     
-    exec blas_weaver("dpotrs")
+    exec blas_exec_cmd["dpotrs"]
     return fn_return_val
 
 
@@ -851,7 +866,7 @@ def dpotrsx(cholA, b):
         assert cholA.shape[0] in [1, b.shape[0]], NUM_ELEM_MISMATCH
         assert cholA.shape[2] == b.shape[1], M_V_DIM_MISMATCH
     
-    exec blas_weaver("dpotrsx")
+    exec blas_exec_cmd["dpotrsx"]
 
 
 # Compute inverse using Cholesky factorisation from dpotrf
@@ -868,7 +883,7 @@ def dpotri(A, INPLACE=False):
     if not INPLACE:
         A = A.copy()
         fn_return_val = A
-    exec blas_weaver("dpotri")
+    exec blas_exec_cmd["dpotri"]
     return fn_return_val
     
 
@@ -911,7 +926,7 @@ def dtrtri(A, UPLO, INPLACE=False):
     if not INPLACE:
         A = A.copy()
         fn_return_val = A
-    exec blas_weaver("dtrtri")
+    exec blas_exec_cmd["dtrtri"]
     return fn_return_val
     
     
@@ -944,7 +959,7 @@ def symmetrise(A, UPLO):
         assert A.shape[1]==A.shape[2], "A must be symmetric"
         assert type(UPLO)
         assert UPLO in ['l', 'L', 'u', 'U'], "UPLO must be one of ['l', 'u', 'L', 'U']"
-    exec blas_weaver("symmetrise")
+    exec blas_exec_cmd["symmetrise"]
     #weave.inline(blas_c_code.symmetrise.code, 
     #             blas_c_code.symmetrise.python_vars, 
     #             libraries=blas_c_code.symmetrise.libraries,
@@ -1151,44 +1166,46 @@ def test_dpotri(num_elements=1000, num_dims=4, num_rows=4):
 def test_dposv(num_elements=1000, num_dims=4, num_rows=4):
     pass
 
-print "Initialising..."
-A = np.random.rand(1, 2, 2) + 10*np.eye(2)
-B = np.random.rand(1, 2, 2) + 10*np.eye(2)
-C = np.random.rand(1, 2, 2) + 10*np.eye(2)
-x = np.random.rand(1, 2)
-y = np.random.rand(1, 2)
-UPLO = 'l'
-TR_A = False
-TR_B = False
-SIDE = 'l'
-alpha = np.array([1.0])
-beta = np.array([1.0])
 
-ddot(x, y)
-dnrm2(x)
-dasum(x)
-idamax(x)
-daxpy(alpha, x, y)
-dscal(alpha, x)
-dcopy(x, y)
-dgemv(A, x, TR_A, alpha, beta, y)
-dtrmv(UPLO, A, x, TR_A)
-dtrsv(UPLO, A, x, TR_A)
-dsymv(UPLO, A, x, alpha, beta, y)
-dger(x, y, alpha, A)
-dsyr(UPLO, x, alpha, A)
-dgemm(A, B, TR_A, TR_B, alpha, beta, C)
-dsymm(A, B, UPLO, SIDE, alpha, beta, C)
-dsyrk(UPLO, A, TR_A, alpha, beta, C)
-LU, ipiv, signum = dgetrf(A)
-dgetrs(LU, ipiv, y, x)
-dgetrsx(LU, ipiv, y)
-dgetri(LU, ipiv)
-dgesv(A, y)
-dgetrdet(LU, signum)
-cholA = dpotrf(A)
-dpotrs(cholA, y, x)
-dpotrsx(cholA, y)
-dpotri(A)
-symmetrise(A, UPLO)
-del A, B, C, x, y, UPLO, TR_A, TR_B, SIDE, alpha, beta, LU, ipiv, signum
+
+def blas_init():
+    A = np.random.rand(1, 2, 2) + 10*np.eye(2)
+    B = np.random.rand(1, 2, 2) + 10*np.eye(2)
+    C = np.random.rand(1, 2, 2) + 10*np.eye(2)
+    x = np.random.rand(1, 2)
+    y = np.random.rand(1, 2)
+    UPLO = 'l'
+    TR_A = False
+    TR_B = False
+    SIDE = 'l'
+    alpha = np.array([1.0])
+    beta = np.array([1.0])
+    
+    ddot(x, y)
+    dnrm2(x)
+    dasum(x)
+    idamax(x)
+    daxpy(alpha, x, y)
+    dscal(alpha, x)
+    dcopy(x, y)
+    dgemv(A, x, TR_A, alpha, beta, y)
+    dtrmv(UPLO, A, x, TR_A)
+    dtrsv(UPLO, A, x, TR_A)
+    dsymv(UPLO, A, x, alpha, beta, y)
+    dger(x, y, alpha, A)
+    dsyr(UPLO, x, alpha, A)
+    dgemm(A, B, TR_A, TR_B, alpha, beta, C)
+    dsymm(A, B, UPLO, SIDE, alpha, beta, C)
+    dsyrk(UPLO, A, TR_A, alpha, beta, C)
+    LU, ipiv, signum = dgetrf(A)
+    dgetrs(LU, ipiv, y, x)
+    dgetrsx(LU, ipiv, y)
+    dgetri(LU, ipiv)
+    dgesv(A, y)
+    dgetrdet(LU, signum)
+    cholA = dpotrf(A)
+    dpotrs(cholA, y, x)
+    dpotrsx(cholA, y)
+    dpotri(A)
+    symmetrise(A, UPLO)
+    del A, B, C, x, y, UPLO, TR_A, TR_B, SIDE, alpha, beta, LU, ipiv, signum

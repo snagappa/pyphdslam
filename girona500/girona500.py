@@ -38,7 +38,7 @@ import numpy as np
 
 import rospy
 import code
-from lib.common.kalmanfilter import kf_update, kf_predict_cov
+from lib.common.kalmanfilter import kf_predict_cov, kf_update, kf_update_cov, kf_update_x
 
 SLAM_FN_DEFS = collections.namedtuple("SLAM_FN_DEFS", 
                 "state_markov_predict_fn state_obs_fn state_likelihood_fn \
@@ -76,7 +76,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         #                            dtype=float)
         self.covariances = np.repeat([1*np.eye(state_parameters["ndims"])], 
                                       state_parameters["nparticles"], 0)
-        
+        self.transition_matrix = np.array([np.eye(6)])
         
     def get_states(self, rows=None, cols=None):
         if rows == None:
@@ -97,6 +97,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
     
     def trans_matrices(self, ctrl_input, delta_t):
         # Get process noise
+        trans_mat = self.transition_matrix
         process_noise = np.array([
             self.parameters.state_markov_predict_fn.parameters.process_noise])
         
@@ -113,16 +114,21 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
                  [c[p]*s[y], c[r]*c[y]+s[r]*s[p]*s[y], -s[r]*c[y]+c[r]*s[p]*s[y] ],
                  [-s[p], s[r]*c[p], c[r]*c[p] ]])
         # Transition matrix
-        trans_mat = np.array([ np.vstack(( np.hstack((np.eye(3), rot_mat)),
-                                   np.hstack((np.zeros((3,3)), np.eye(3))) )) ])
+        #trans_mat = np.array([ np.vstack(( np.hstack((np.eye(3), rot_mat)),
+        #                           np.hstack((np.zeros((3,3)), np.eye(3))) )) ])
+        trans_mat[0,0:3,3:] = rot_mat
         ## Add white Gaussian noise to the predicted states
         # Compute scaling for the noise
-        scale_matrix = np.array([np.vstack((rot_mat*delta_t/2, delta_t*np.eye(3)))])
+        #scale_matrix = np.array([np.vstack((rot_mat*delta_t/2, delta_t*np.eye(3)))])
         
         # Compute the process noise as scale_matrix*process_noise*scale_matrix'
-        sc_process_noise = blas.dgemm(scale_matrix, 
-                       blas.dgemm(process_noise, scale_matrix, 
-                                  TRANSPOSE_B=True, beta=0.0), beta=0.0)[0]
+        #sc_process_noise = blas.dgemm(scale_matrix, 
+        #               blas.dgemm(process_noise, scale_matrix, 
+        #                          TRANSPOSE_B=True, beta=0.0), beta=0.0)[0]
+        #sc_process_noise += delta_t/10*np.eye(6)
+        
+        scale_matrix = np.vstack((rot_mat*delta_t/2, delta_t*np.eye(3)))
+        sc_process_noise = np.dot(scale_matrix, np.dot(process_noise, scale_matrix.T)).squeeze() + delta_t/10*np.eye(6)
         return trans_mat, sc_process_noise
     
     def predict(self, ctrl_input, predict_to_time):
@@ -138,6 +144,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         
         trans_mat, sc_process_noise = self.trans_matrices(ctrl_input, delta_t)
         pred_states = blas.dgemv(trans_mat, self.states)
+        #pred_states2 = np.dot(trans_mat[0], self.states.T).T
         nparticles = self.parameters.state_parameters["nparticles"]
         ndims = self.parameters.state_parameters["ndims"]
         if not USE_KF:
@@ -175,7 +182,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
     def update_gps(self, gps_obs):
         USE_KF = True
         if USE_KF == True:
-            obs_matrix = np.array([np.hstack(( np.eye(2), np.zeros((4,4)) ))])
+            obs_matrix = np.array([self.parameters.state_obs_fn.parameters.gpsH])
             obs_noise = np.array([self.parameters.state_likelihood_fn.parameters.gps_obs_noise])
             upd_weights, upd_states, upd_covs = \
                     g500_kf_update(self.weights, self.states, self.covariances,
@@ -193,7 +200,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
     def update_dvl(self, dvl_obs):
         USE_KF = True
         if USE_KF:
-            obs_matrix = np.array([np.hstack(( np.zeros((3,3)), np.eye(3) ))])
+            obs_matrix = np.array([self.parameters.state_obs_fn.parameters.dvlH])
             obs_noise = np.array([self.parameters.state_likelihood_fn.parameters.dvl_obs_noise])
             upd_weights, upd_states, upd_covs = \
                     g500_kf_update(self.weights, self.states, self.covariances,
@@ -234,7 +241,6 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         #print observation_set
         #state_xyz = self.maps[0].parameters.obs_fn.parameters.parent_state_xyz
         state_rpy = self.maps[0].parameters.obs_fn.parameters.parent_state_rpy
-        #code.interact(local=locals())
         observation_set = np.array(observation_set[:, [1, 0, 2]], order='C')
         feature_abs_posn = np.array([self.weights[i]*feature_absolute_position(self.maps[i].parameters.obs_fn.parameters.parent_state_xyz, state_rpy, observation_set) for i in range(len(self.maps))])
         feature_abs_posn = feature_abs_posn.sum(axis=0)
@@ -245,6 +251,8 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         #print state_xyz
         
     def resample(self):
+        if self.parameters.state_parameters["resample_threshold"] < 0:
+            return
         # Effective number of particles
         eff_nparticles = 1/np.power(self.weights, 2).sum()
         resample_threshold = (
@@ -306,8 +314,22 @@ def feature_absolute_position(vehicle_xyz, vehicle_rpy, features_xyz):
 
 def g500_kf_update(weights, states, covs, obs_matrix, obs_noise, z):
     upd_weights = weights.copy()
-    upd_states = np.empty(states.shape)
-    upd_covs = np.empty(covs.shape)
+    #upd_states = np.empty(states.shape)
+    #upd_covs = np.empty(covs.shape)
+    # Covariance is the same for all the particles
+    upd_cov0, kalman_info = kf_update_cov(np.array([covs[0]]), obs_matrix, obs_noise, False)
+    upd_covs = np.repeat(upd_cov0, covs.shape[0], axis=0)
+    # Update the states
+    pred_z = blas.dgemv(obs_matrix, states)
+    upd_states, residuals = kf_update_x(states, pred_z, z, kalman_info.kalman_gain)
+    # Evaluate the new weight
+    x_pdf = np.exp(-0.5*np.power(
+                blas.dgemv(kalman_info.inv_sqrt_S, residuals), 2).sum(axis=1))/ \
+                np.sqrt(kalman_info.det_S*(2*np.pi)**z.shape[0])
+    upd_weights = weights * x_pdf
+    upd_weights /= upd_weights.sum()
+    
+    """
     for count in range(states.shape[0]):
         this_state = states[count]
         this_state.shape = (1,) + this_state.shape
@@ -323,6 +345,7 @@ def g500_kf_update(weights, states, covs, obs_matrix, obs_noise, z):
         upd_states[count] = upd_state
         upd_covs[count] = upd_covariance
     upd_weights /= upd_weights.sum()
+    """
     return upd_weights, upd_states, upd_covs
     
 
@@ -335,6 +358,8 @@ def g500_slam_fn_defs():
     # Vehicle state to observation space
     state_obs_fn_handle = None
     state_obs_fn_parameters = PARAMETERS()
+    state_obs_fn_parameters.gpsH = np.hstack(( np.eye(2), np.zeros((2,4)) ))
+    state_obs_fn_parameters.dvlH = np.hstack(( np.zeros((3,3)), np.eye(3) ))
     state_obs_fn = fn_params(state_obs_fn_handle, state_obs_fn_parameters)
     
     # Likelihood function for importance sampling
