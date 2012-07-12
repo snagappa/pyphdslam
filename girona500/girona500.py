@@ -39,6 +39,7 @@ import numpy as np
 import rospy
 import code
 from lib.common.kalmanfilter import kf_predict_cov, kf_update, kf_update_cov, kf_update_x
+import featuredetector
 
 SLAM_FN_DEFS = collections.namedtuple("SLAM_FN_DEFS", 
                 "state_markov_predict_fn state_obs_fn state_likelihood_fn \
@@ -240,9 +241,11 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         #print "Observed:"
         #print observation_set
         #state_xyz = self.maps[0].parameters.obs_fn.parameters.parent_state_xyz
-        state_rpy = self.maps[0].parameters.obs_fn.parameters.parent_state_rpy
-        observation_set = np.array(observation_set[:, [1, 0, 2]], order='C')
-        feature_abs_posn = np.array([self.weights[i]*feature_absolute_position(self.maps[i].parameters.obs_fn.parameters.parent_state_xyz, state_rpy, observation_set) for i in range(len(self.maps))])
+        #state_rpy = self.maps[0].parameters.obs_fn.parameters.parent_state_rpy
+        state_rpy = np.array([0, 0, self.maps[0].parameters.obs_fn.parameters.parent_state_rpy[2]])
+        
+        #observation_set = np.array(observation_set[:, [1, 0, 2]], order='C')
+        feature_abs_posn = np.array([self.weights[i]*featuredetector.tf.absolute(self.maps[i].parameters.obs_fn.parameters.parent_state_xyz, state_rpy, observation_set) for i in range(len(self.maps))])
         feature_abs_posn = feature_abs_posn.sum(axis=0)
         
         print "Absolute (inverse):"

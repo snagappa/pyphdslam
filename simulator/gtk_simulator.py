@@ -24,10 +24,10 @@ import matplotlib
 mpl = matplotlib
 matplotlib.use('Agg') 
 from matplotlib.figure import Figure 
-from matplotlib.axes import Subplot 
+#from matplotlib.axes import Subplot 
 from matplotlib.backends.backend_gtkagg import FigureCanvasGTK
-from matplotlib import cm # colormap
-from matplotlib import pylab
+#from matplotlib import cm # colormap
+#from matplotlib import pylab
 import matplotlib.nxutils as nxutils
 
 #pylab.hold(False) # This will avoid memory leak
@@ -41,11 +41,10 @@ import tf
 from sensor_msgs.msg import PointCloud2
 #import pc2wrapper
 from lib.common import pointclouds
-from girona500 import girona500
+import featuredetector
 
 import threading
 import numpy as np
-import code
 
 class STRUCT(object): pass
 
@@ -89,9 +88,10 @@ class gtk_slam_sim:
         self.viewer.size = STRUCT()
         self.viewer.textview = STRUCT()
         
-        self.viewer.NE_spinbutton = STRUCT()
-        self.viewer.NE_spinbutton.east = 0.0
-        self.viewer.NE_spinbutton.north = 0.0
+        self.viewer.NED_spinbutton = STRUCT()
+        self.viewer.NED_spinbutton.east = 0.0
+        self.viewer.NED_spinbutton.north = 0.0
+        self.viewer.NED_spinbutton.depth = 0.0
         
         self.viewer.size.width = 10
         self.viewer.size.height = 10
@@ -167,14 +167,25 @@ class gtk_slam_sim:
         print "set mode to waypoints"
         
     def set_spinbutton_north(self, widget):
-        self.viewer.NE_spinbutton.north = widget.get_value()
-        p = [self.viewer.NE_spinbutton.east, self.viewer.NE_spinbutton.north]
-        print "new point set to ", str(p)
+        self.viewer.NED_spinbutton.north = widget.get_value()
+        p = [self.viewer.NED_spinbutton.north, 
+             self.viewer.NED_spinbutton.east, 
+             self.viewer.NED_spinbutton.depth]
+        print "new point set to (N,E,D)", str(p)
     
     def set_spinbutton_east(self, widget):
-        self.viewer.NE_spinbutton.east = widget.get_value()
-        p = [self.viewer.NE_spinbutton.east, self.viewer.NE_spinbutton.north]
-        print "new point set to ", str(p)
+        self.viewer.NED_spinbutton.east = widget.get_value()
+        p = [self.viewer.NED_spinbutton.north, 
+             self.viewer.NED_spinbutton.east, 
+             self.viewer.NED_spinbutton.depth]
+        print "new point set to (N,E,D)", str(p)
+        
+    def set_spinbutton_depth(self, widget):
+        self.viewer.NED_spinbutton.depth = widget.get_value()
+        p = [self.viewer.NED_spinbutton.north, 
+             self.viewer.NED_spinbutton.east, 
+             self.viewer.NED_spinbutton.depth]
+        print "new point set to (N,E,D)", str(p)
         
     def set_spinbutton_viewer_width(self, widget):
         self.viewer.size.width = widget.get_value()
@@ -219,20 +230,22 @@ class gtk_slam_sim:
         self.set_damage()
         
     def add_spinbutton_point(self, widget):
-        NE_point = [self.viewer.NE_spinbutton.north, self.viewer.NE_spinbutton.east]
-        self.add_point(*NE_point)
-        print "added new point at (N,E) : ", str(NE_point)
+        NED_point = [self.viewer.NED_spinbutton.north, 
+                     self.viewer.NED_spinbutton.east, 
+                     self.viewer.NED_spinbutton.depth]
+        self.add_point(*NED_point)
+        print "added new point at (N,E,D) : ", str(NED_point)
         self.set_damage()
         
     def add_cursor_point(self, event):
         if event.inaxes != self.viewer.axis: return
-        NE_point = [event.ydata, event.xdata]
-        self.add_point(*NE_point)
-        print "added new point at (N,E) : ", str(NE_point)
+        NED_point = [event.ydata, event.xdata, self.viewer.NED_spinbutton.depth]
+        self.add_point(*NED_point)
+        print "added new point at (N,E,D) : ", str(NED_point)
         self.set_damage()
         
-    def add_point(self, north, east):
-        point = [east, north]
+    def add_point(self, north, east, depth):
+        point = [north, east, depth]
         self.scene.__current_list__.append(point)
     
     def start_sim(self, widget):
@@ -261,8 +274,8 @@ class gtk_slam_sim:
                     self.simulator.ABORT = False
                     return
                 goto_wp_req = GotoSrvRequest()
-                goto_wp_req.north = this_wp[1]
-                goto_wp_req.east = this_wp[0]
+                goto_wp_req.north = this_wp[0]
+                goto_wp_req.east = this_wp[1]
                 response = goto_wp(goto_wp_req)
                 print response
                 waypoint_index += 1
@@ -328,20 +341,18 @@ class gtk_slam_sim:
             # copy visible landmarks to self.vehicle.visible_landmarks.abs
             landmarks = np.array(self.scene.landmarks)
             if landmarks.shape[0]:
-                landmarks_mask = nxutils.points_inside_poly(landmarks, vertices)
+                landmarks_mask = nxutils.points_inside_poly(landmarks[:, [1,0]], vertices)
                 self.vehicle.visible_landmarks.abs = landmarks[landmarks_mask]
-                # Pad the landmarks with z=0
-                self.vehicle.visible_landmarks.abs = \
-                    np.array(np.hstack((self.vehicle.visible_landmarks.abs, 
-                    np.zeros((self.vehicle.visible_landmarks.abs.shape[0], 1)))), order='C')
+                self.vehicle.visible_landmarks.rel = \
+                    featuredetector.tf.relative(np.array([north, east, depth]), 
+                                                        self.vehicle.roll_pitch_yaw, 
+                                                        self.vehicle.visible_landmarks.abs)
             else:
                 self.vehicle.visible_landmarks.abs = np.empty(0)
+                self.vehicle.visible_landmarks.rel = np.empty(0)
             # Perform translation/rotation of visible landmarks to
             # self.vehicle.visible_landmarks.rel
-            self.vehicle.visible_landmarks.rel = \
-                girona500.feature_relative_position(np.array([east, north, depth]), 
-                                                              self.vehicle.roll_pitch_yaw, 
-                                                              self.vehicle.visible_landmarks.abs)
+            
         finally:
             self.vehicle.LOCK.release()
         # Publish the landmarks
@@ -352,6 +363,7 @@ class gtk_slam_sim:
         #self.publish_visible_landmarks()
     
     def publish_visible_landmarks(self, *args, **kwargs):
+        self.update_visible_landmarks()
         rel_landmarks = self.vehicle.visible_landmarks.rel
         if not rel_landmarks.shape[0]: return
         
@@ -389,7 +401,7 @@ class gtk_slam_sim:
         # Plot visible landmarks
         points = np.array(self.vehicle.visible_landmarks.abs)
         if points.shape[0]:
-            self.viewer.axis.scatter(points[:,0], points[:,1], s=36, marker='o')
+            self.viewer.axis.scatter(points[:,1], points[:,0], s=36, marker='o')
     
     def draw(self, *args, **kwargs):
         if not self.viewer.DRAW_CANVAS:
@@ -408,11 +420,11 @@ class gtk_slam_sim:
         
         points = np.array(self.scene.waypoints)
         if points.shape[0]:
-            axis.plot(points[:,0], points[:,1], '-x')
+            axis.plot(points[:,1], points[:,0], '-x')
         
         points = np.array(self.scene.landmarks)
         if points.shape[0]:
-            axis.scatter(points[:,0], points[:,1], c='r', s=16, marker='o')
+            axis.scatter(points[:,1], points[:,0], c='r', s=16, marker='o')
         
         self.draw_vehicle()
         self.draw_visible_landmarks()

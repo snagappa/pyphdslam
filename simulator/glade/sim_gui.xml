@@ -3,19 +3,19 @@
   <!-- interface-requires gtk+ 3.0 -->
   <object class="GtkAdjustment" id="adj_depth_position">
     <property name="upper">10</property>
-    <property name="step_increment">0.5</property>
+    <property name="step_increment">0.10000000000000001</property>
     <property name="page_increment">1</property>
   </object>
   <object class="GtkAdjustment" id="adj_east_position">
     <property name="lower">-100</property>
     <property name="upper">100</property>
-    <property name="step_increment">0.5</property>
+    <property name="step_increment">0.10000000000000001</property>
     <property name="page_increment">10</property>
   </object>
   <object class="GtkAdjustment" id="adj_north_position">
     <property name="lower">-100</property>
     <property name="upper">100</property>
-    <property name="step_increment">0.5</property>
+    <property name="step_increment">0.10000000000000001</property>
     <property name="page_increment">5</property>
   </object>
   <object class="GtkAdjustment" id="adj_viewer_height">
@@ -31,20 +31,6 @@
     <property name="value">10</property>
     <property name="step_increment">1</property>
     <property name="page_increment">10</property>
-  </object>
-  <object class="GtkAdjustment" id="fov_depth">
-    <property name="lower">1</property>
-    <property name="upper">5</property>
-    <property name="value">3</property>
-    <property name="step_increment">0.10000000000000001</property>
-    <property name="page_increment">0.5</property>
-  </object>
-  <object class="GtkAdjustment" id="fov_width">
-    <property name="lower">1</property>
-    <property name="upper">3</property>
-    <property name="value">1.5</property>
-    <property name="step_increment">0.10000000000000001</property>
-    <property name="page_increment">0.5</property>
   </object>
   <object class="GtkToggleAction" id="toggleaction1"/>
   <object class="GtkWindow" id="MainWindow">
@@ -325,7 +311,7 @@
                                 <property name="visible">True</property>
                                 <property name="sensitive">False</property>
                                 <property name="can_focus">False</property>
-                                <property name="label" translatable="yes">Depth (m)</property>
+                                <property name="label" translatable="yes">z (depth) (m)</property>
                               </object>
                               <packing>
                                 <property name="expand">True</property>
@@ -334,7 +320,7 @@
                               </packing>
                             </child>
                             <child>
-                              <object class="GtkSpinButton" id="spinbutton3">
+                              <object class="GtkSpinButton" id="spinbutton_z_pos">
                                 <property name="visible">True</property>
                                 <property name="sensitive">False</property>
                                 <property name="can_focus">True</property>
@@ -342,6 +328,7 @@
                                 <property name="adjustment">adj_depth_position</property>
                                 <property name="digits">2</property>
                                 <property name="numeric">True</property>
+                                <signal name="value-changed" handler="set_spinbutton_depth" swapped="no"/>
                               </object>
                               <packing>
                                 <property name="expand">True</property>
@@ -836,5 +823,19 @@
         </child>
       </object>
     </child>
+  </object>
+  <object class="GtkAdjustment" id="fov_depth">
+    <property name="lower">1</property>
+    <property name="upper">5</property>
+    <property name="value">3</property>
+    <property name="step_increment">0.10000000000000001</property>
+    <property name="page_increment">0.5</property>
+  </object>
+  <object class="GtkAdjustment" id="fov_width">
+    <property name="lower">1</property>
+    <property name="upper">3</property>
+    <property name="value">1.5</property>
+    <property name="step_increment">0.10000000000000001</property>
+    <property name="page_increment">0.5</property>
   </object>
 </interface>
