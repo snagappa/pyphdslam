@@ -38,9 +38,9 @@ from nav_msgs.msg import Odometry
 from control_g500.srv import GotoSrv, GotoSrvRequest
 import rospy
 import tf
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointCloud2, PointField
 #import pc2wrapper
-from lib.common import pointclouds
+from lib.common import pointclouds, pc2wrapper
 import featuredetector
 
 import threading
@@ -115,6 +115,7 @@ class gtk_slam_sim:
 
         self.glade.connect_signals(self)
         
+        self.ros = STRUCT()
         self.init_ros()
         self.viewer.figure = Figure(figsize=(512, 512), dpi=75)
         self.viewer.axis = self.viewer.figure.add_subplot(111) 
@@ -151,7 +152,13 @@ class gtk_slam_sim:
         # Create Subscriber
         rospy.Subscriber("/uwsim/girona500_odom", Odometry, self.update_position)
         # Create Publisher
-        self.pcl_publisher = rospy.Publisher("/slamsim/features", PointCloud2)
+        self.ros.pcl_publisher = rospy.Publisher("/slamsim/features", PointCloud2)
+        field_name = ['x', 'y', 'z', 'sigma_x', 'sigma_y', 'sigma_z']
+        field_offset = range(0, 24, 4)
+        self.ros.pcl_fields = [PointField(_field_name_, _field_offset_, 
+                                          PointField.FLOAT32, 1) for 
+                                (_field_name_, _field_offset_) in zip(field_name, field_offset)]
+        self.ros.pcl_header = PointCloud2().header
         
     def on_MainWindow_delete_event(self, widget, event):
             gtk.main_quit()
@@ -368,10 +375,14 @@ class gtk_slam_sim:
         if not rel_landmarks.shape[0]: return
         
         # Convert xyz to PointCloud message
-        pcl_msg = pointclouds.xyz_array_to_pointcloud2(rel_landmarks, 
-                                                       rospy.Time.now(), "slamsim")
+        #pcl_msg = pointclouds.xyz_array_to_pointcloud2(rel_landmarks, rospy.Time.now(), "slamsim")
+        # Convert xyz to PointCloud message with (diagonal) covariance
+        rel_landmarks = np.hstack((rel_landmarks, np.ones(rel_landmarks.shape)))
+        self.ros.pcl_header.stamp = rospy.Time.now()
+        self.ros.pcl_header.frame_id = "slamsim"
+        pcl_msg = pc2wrapper.create_cloud(self.ros.pcl_header, self.ros.pcl_fields, rel_landmarks)
         # and publish visible landmarks
-        self.pcl_publisher.publish(pcl_msg)
+        self.ros.pcl_publisher.publish(pcl_msg)
         print "Published Landmarks:"
         print rel_landmarks
     
