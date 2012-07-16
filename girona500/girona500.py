@@ -243,7 +243,8 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         #state_xyz = self.maps[0].parameters.obs_fn.parameters.parent_state_xyz
         #state_rpy = self.maps[0].parameters.obs_fn.parameters.parent_state_rpy
         state_rpy = np.array([0, 0, self.maps[0].parameters.obs_fn.parameters.parent_state_rpy[2]])
-        
+        obs_cov = observation_set[:,3:].copy()
+        observation_set = observation_set[:,0:3].copy()
         #observation_set = np.array(observation_set[:, [1, 0, 2]], order='C')
         feature_abs_posn = np.array([self.weights[i]*featuredetector.tf.absolute(self.maps[i].parameters.obs_fn.parameters.parent_state_xyz, state_rpy, observation_set) for i in range(len(self.maps))])
         feature_abs_posn = feature_abs_posn.sum(axis=0)

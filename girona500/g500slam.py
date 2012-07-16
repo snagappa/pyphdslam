@@ -47,7 +47,7 @@ import girona500
 from lib.phdfilter.phdfilter import PARAMETERS
 from lib.common import pointclouds
 from lib.common.kalmanfilter import sigma_pts
-
+import featuredetector
 
 INVALID_ALTITUDE = -32665
 SAVITZKY_GOLAY_COEFFS = [0.2,  0.1,  0. , -0.1, -0.2]
@@ -155,6 +155,8 @@ class G500_SLAM():
         # Buffer for smoothing the yaw rate
         config.heading_buffer = []
         config.savitzky_golay_coeffs = SAVITZKY_GOLAY_COEFFS
+        
+        self.ros.pcl_helper = featuredetector.msgs.msgs(featuredetector.msgs.MSG_XYZ_COV)
         if not __PROFILE__:
             print "Creating ROS subscriptions..."
             # Create Subscriber
@@ -450,8 +452,8 @@ class G500_SLAM():
             # Convert the pointcloud slam features into normal x,y,z
             # The pointcloud may have uncertainty on the points - this will be
             # the observation noise
-            slam_features = pointclouds.pointcloud2_to_xyz_array(pcl_msg)
-            
+            #slam_features = pointclouds.pointcloud2_to_xyz_array(pcl_msg)
+            slam_features = self.ros.pcl_helper.from_pcl(pcl_msg)
             # We can now access the points as slam_features[i]
             self.slam_worker.update_with_features(slam_features, 
                                                   pcl_msg.header.stamp)
