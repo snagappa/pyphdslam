@@ -29,7 +29,7 @@ import collections
 from lib.common import blas
 from lib.common import misctools
 from lib.common import kalmanfilter
-
+import code
 #def placeholder():
 #    return (lambda:0)
 
@@ -62,7 +62,7 @@ class GMSTATES(object):
         return self._covariance_
         
     def append(self, new_state):
-        if self._state_.shape[0] == 0 or self._state_.shape[1] == 0:
+        if self._state_.shape[0] == 0:# or self._state_.shape[1] == 0:
             self._state_ = new_state.state().copy()
             self._covariance_ = new_state.covariance().copy()
         else:
@@ -82,10 +82,10 @@ class GMSTATES(object):
             state_copy = self.__class__(0)
         else:
             state_copy = self
-            fn_return_val = state_copy
-        
-        state_copy._state_ = self._state_[idx_vector]
-        state_copy._covariance_ = self._covariance_[idx_vector]
+        fn_return_val = state_copy
+        if state_copy._state_.shape[0]:
+            state_copy._state_ = self._state_[idx_vector]
+            state_copy._covariance_ = self._covariance_[idx_vector]
         return fn_return_val
         
     
@@ -145,11 +145,16 @@ class GMPHD(PHD):
     def phdUpdate(self, observation_set):
         # Container for slam parent update
         slam_info = PARAMETERS()
-        num_observations = len(observation_set)
+        num_observations = observation_set.shape[0]
         if num_observations:
             z_dim = observation_set.shape[1]
         else:
             z_dim = 0
+        
+        if not self.weights.shape[0]:
+            self._states_ = self.states.copy()
+            self._weights_ = self.weights.copy()
+            return
         
         detection_probability = self.parameters.pd_fn.handle(self.states, 
                                             self.parameters.pd_fn.parameters)
@@ -214,6 +219,7 @@ class GMPHD(PHD):
             self._weights_ += [new_weight]
             
         self._weights_ = np.concatenate(self._weights_)
+        code.interact(local=locals())
         # SLAM, finalise:
         slam_info.likelihood = (slam_info.exp_sum__pd_predwt * 
                                 slam_info.sum__clutter_with_pd_predwt.prod())
@@ -277,9 +283,9 @@ class GMPHD(PHD):
         
     
     def phdFlattenUpdate(self):
-        self.states = self._states_
-        self.weights = self._weights_
-        self._states_ = self._states_.__class(0)
+        self.states = self._states_.copy()
+        self.weights = self._weights_.copy()
+        self._states_ = self._states_.__class__(0)
         self._weights_ = np.empty(0, dtype=float)
     
     
@@ -308,14 +314,16 @@ class GMPHD(PHD):
         estimates = self.phdEstimate()
         # Prune low weight Gaussian components
         self.phdPrune()
-        # Create birth terms from measurements
-        birth_states, birth_weights = self.phdGenerateBirth(observations)
-        # Append birth terms to Gaussian mixture
-        self.phdAppendBirth(birth_states, birth_weights)
         # Merge components
         self.phdMerge()
         # End of iteration call
         self.phdFlattenUpdate()
+        
+        # Create birth terms from measurements
+        birth_states, birth_weights = self.phdGenerateBirth(observations)
+        # Append birth terms to Gaussian mixture
+        self.phdAppendBirth(birth_states, birth_weights)
+        
         return estimates
     
     
@@ -341,7 +349,7 @@ def measurement_birth(z, parameters):
     P = np.array([parameters.R]).repeat(len(z), 0)
     birth_states = GMSTATES(0)
     birth_states.set(x, P)
-    birth_weights = parameters.intensity*range(len(z))
+    birth_weights = parameters.intensity*np.ones(z.shape[0])
     return birth_states, birth_weights
     
 

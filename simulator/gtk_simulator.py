@@ -58,6 +58,12 @@ class gtk_slam_sim:
         self.vehicle.fov = STRUCT()
         self.vehicle.fov.width = 1.5
         self.vehicle.fov.depth = 3.0
+        self.vehicle.fov.x_deg = 60
+        self.vehicle.fov.y_deg = 45
+        self.vehicle.fov.far_m = 3
+        self.vehicle.sensor_fov = featuredetector.sensors.camera_fov(self.vehicle.fov.x_deg, 
+                                                                     self.vehicle.fov.y_deg, 
+                                                                     self.vehicle.fov.far_m)
         self.vehicle.visible_landmarks = STRUCT()
         self.vehicle.visible_landmarks.abs = np.empty(0)
         self.vehicle.visible_landmarks.rel = np.empty(0)
@@ -214,6 +220,25 @@ class gtk_slam_sim:
         self.vehicle.fov.depth = widget.get_value()
         self.set_damage()
         
+    def set_spinbutton_fov_x(self, widget):
+        self.vehicle.fov.x_deg = widget.get_value()
+        self.set_sensor_fov()
+        self.set_damage()
+        
+    def set_spinbutton_fov_y(self, widget):
+        self.vehicle.fov.y_deg = widget.get_value()
+        self.set_sensor_fov()
+        self.set_damage()
+    
+    def set_spinbutton_fov_far(self, widget):
+        self.vehicle.fov.far_m = widget.get_value()
+        self.set_sensor_fov()
+        self.set_damage()
+        
+    def set_sensor_fov(self):
+        self.vehicle.sensor_fov.set_x_y_far(self.vehicle.fov.x_deg, 
+                                            self.vehicle.fov.y_deg, 
+                                            self.vehicle.fov.far_m)
     def undo(self, widget):
         if len(self.scene.__current_list__):
             self.scene.__last_point__ = self.scene.__current_list__.pop()
@@ -327,6 +352,27 @@ class gtk_slam_sim:
     def update_visible_landmarks(self, *args, **kwargs):
         self.vehicle.LOCK.acquire()
         try:
+            landmarks = np.array(self.scene.landmarks)
+            relative_landmarks = featuredetector.tf.relative(self.vehicle.north_east_depth, 
+                                                             self.vehicle.roll_pitch_yaw, 
+                                                             landmarks)
+            visible_landmarks_idx = self.vehicle.sensor_fov.is_visible(relative_landmarks)
+            self.vehicle.visible_landmarks.abs = landmarks[visible_landmarks_idx]
+            self.vehicle.visible_landmarks.rel = relative_landmarks[visible_landmarks_idx]
+            
+            # Set vertices
+            vertices = self.vehicle.sensor_fov.fov_vertices_2d()
+            
+            # Rotate by the yaw
+            cy = np.cos(self.vehicle.roll_pitch_yaw[2])
+            sy = np.sin(self.vehicle.roll_pitch_yaw[2])
+            vertices = np.dot(np.array([[cy, sy], [-sy, cy]]), vertices.T).T
+            # Translation to vehicle position
+            north, east, depth = self.vehicle.north_east_depth
+            vertices += np.array([east, north])
+            self.vehicle.visible_landmarks.fov = vertices
+            
+            """
             north, east, depth = self.vehicle.north_east_depth
             yaw = self.vehicle.roll_pitch_yaw[2]
             vis_width = self.vehicle.fov.width
@@ -358,7 +404,7 @@ class gtk_slam_sim:
                 self.vehicle.visible_landmarks.rel = np.empty(0)
             # Perform translation/rotation of visible landmarks to
             # self.vehicle.visible_landmarks.rel
-            
+            """
         finally:
             self.vehicle.LOCK.release()
         # Publish the landmarks
@@ -384,8 +430,8 @@ class gtk_slam_sim:
         pcl_msg.header.frame_id = self.ros.name
         # and publish visible landmarks
         self.ros.pcl_publisher.publish(pcl_msg)
-        print "Published Landmarks:"
-        print rel_landmarks
+        print "Visible Landmarks (abs):"
+        print self.vehicle.visible_landmarks.abs
     
     def set_damage(self):
         self.viewer.LOCK.acquire()

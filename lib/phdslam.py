@@ -49,14 +49,14 @@ class GMPHD_SLAM_FEATURE(gmphdfilter.GMPHD):
         #estimates = self.phdEstimate()
         # Prune low weight Gaussian components
         self.phdPrune()
-        # Create birth terms from measurements
-        birth_states, birth_weights = self.phdGenerateBirth(observations)
-        # Append birth terms to Gaussian mixture
-        self.phdAppendBirth(birth_states, birth_weights)
         # Merge components
         self.phdMerge()
         # End of iteration call
         self.phdFlattenUpdate()
+        # Create birth terms from measurements
+        birth_states, birth_weights = self.phdGenerateBirth(observations)
+        # Append birth terms to Gaussian mixture
+        self.phdAppendBirth(birth_states, birth_weights)
         #return estimates
         return slam_info
 

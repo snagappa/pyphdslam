@@ -32,6 +32,41 @@
     <property name="step_increment">1</property>
     <property name="page_increment">10</property>
   </object>
+  <object class="GtkAdjustment" id="fov_depth">
+    <property name="lower">1</property>
+    <property name="upper">5</property>
+    <property name="value">3</property>
+    <property name="step_increment">0.10000000000000001</property>
+    <property name="page_increment">0.5</property>
+  </object>
+  <object class="GtkAdjustment" id="fov_far">
+    <property name="lower">1</property>
+    <property name="upper">10</property>
+    <property name="value">3</property>
+    <property name="step_increment">1</property>
+    <property name="page_increment">10</property>
+  </object>
+  <object class="GtkAdjustment" id="fov_width">
+    <property name="lower">1</property>
+    <property name="upper">3</property>
+    <property name="value">1.5</property>
+    <property name="step_increment">0.10000000000000001</property>
+    <property name="page_increment">0.5</property>
+  </object>
+  <object class="GtkAdjustment" id="fov_x">
+    <property name="lower">30</property>
+    <property name="upper">90</property>
+    <property name="value">60</property>
+    <property name="step_increment">1</property>
+    <property name="page_increment">10</property>
+  </object>
+  <object class="GtkAdjustment" id="fov_y">
+    <property name="lower">30</property>
+    <property name="upper">60</property>
+    <property name="value">45</property>
+    <property name="step_increment">1</property>
+    <property name="page_increment">10</property>
+  </object>
   <object class="GtkToggleAction" id="toggleaction1"/>
   <object class="GtkWindow" id="MainWindow">
     <property name="visible">True</property>
@@ -141,8 +176,20 @@
                           </object>
                           <packing>
                             <property name="expand">True</property>
-                            <property name="fill">True</property>
+                            <property name="fill">False</property>
                             <property name="position">0</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkVSeparator" id="separator5">
+                            <property name="visible">True</property>
+                            <property name="can_focus">False</property>
+                            <property name="orientation">vertical</property>
+                          </object>
+                          <packing>
+                            <property name="expand">True</property>
+                            <property name="fill">True</property>
+                            <property name="position">1</property>
                           </packing>
                         </child>
                         <child>
@@ -201,9 +248,9 @@
                             </child>
                           </object>
                           <packing>
-                            <property name="expand">False</property>
+                            <property name="expand">True</property>
                             <property name="fill">True</property>
-                            <property name="position">1</property>
+                            <property name="position">2</property>
                           </packing>
                         </child>
                       </object>
@@ -309,7 +356,6 @@
                             <child>
                               <object class="GtkLabel" id="label8">
                                 <property name="visible">True</property>
-                                <property name="sensitive">False</property>
                                 <property name="can_focus">False</property>
                                 <property name="label" translatable="yes">z (depth) (m)</property>
                               </object>
@@ -322,7 +368,6 @@
                             <child>
                               <object class="GtkSpinButton" id="spinbutton_z_pos">
                                 <property name="visible">True</property>
-                                <property name="sensitive">False</property>
                                 <property name="can_focus">True</property>
                                 <property name="invisible_char">●</property>
                                 <property name="adjustment">adj_depth_position</property>
@@ -546,7 +591,7 @@
                               <object class="GtkLabel" id="label6">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
-                                <property name="label" translatable="yes">Width (m)</property>
+                                <property name="label" translatable="yes">x (deg)</property>
                               </object>
                               <packing>
                                 <property name="expand">False</property>
@@ -558,12 +603,24 @@
                               <object class="GtkLabel" id="label7">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
-                                <property name="label" translatable="yes">Depth (m)</property>
+                                <property name="label" translatable="yes">y (deg)</property>
                               </object>
                               <packing>
                                 <property name="expand">False</property>
                                 <property name="fill">True</property>
                                 <property name="position">1</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="label10">
+                                <property name="visible">True</property>
+                                <property name="can_focus">False</property>
+                                <property name="label" translatable="yes">far (m)</property>
+                              </object>
+                              <packing>
+                                <property name="expand">True</property>
+                                <property name="fill">True</property>
+                                <property name="position">2</property>
                               </packing>
                             </child>
                           </object>
@@ -579,14 +636,15 @@
                             <property name="can_focus">False</property>
                             <property name="homogeneous">True</property>
                             <child>
-                              <object class="GtkSpinButton" id="spinbutton1">
+                              <object class="GtkSpinButton" id="spinbutton_fov_x">
                                 <property name="visible">True</property>
                                 <property name="can_focus">True</property>
                                 <property name="invisible_char">●</property>
-                                <property name="adjustment">fov_width</property>
-                                <property name="digits">2</property>
+                                <property name="progress_pulse_step">0.10000000149011612</property>
+                                <property name="adjustment">fov_x</property>
+                                <property name="climb_rate">1</property>
                                 <property name="numeric">True</property>
-                                <signal name="value-changed" handler="set_spinbutton_fov_width" swapped="no"/>
+                                <signal name="value-changed" handler="set_spinbutton_fov_x" swapped="no"/>
                               </object>
                               <packing>
                                 <property name="expand">False</property>
@@ -595,19 +653,33 @@
                               </packing>
                             </child>
                             <child>
-                              <object class="GtkSpinButton" id="spinbutton2">
+                              <object class="GtkSpinButton" id="spinbutton_fov_y">
                                 <property name="visible">True</property>
                                 <property name="can_focus">True</property>
                                 <property name="invisible_char">●</property>
-                                <property name="adjustment">fov_depth</property>
-                                <property name="digits">2</property>
+                                <property name="adjustment">fov_y</property>
                                 <property name="numeric">True</property>
-                                <signal name="value-changed" handler="set_spinbutton_fov_depth" swapped="no"/>
+                                <signal name="value-changed" handler="set_spinbutton_fov_y" swapped="no"/>
                               </object>
                               <packing>
                                 <property name="expand">False</property>
                                 <property name="fill">True</property>
                                 <property name="position">1</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkSpinButton" id="spinbutton_far">
+                                <property name="visible">True</property>
+                                <property name="can_focus">True</property>
+                                <property name="invisible_char">●</property>
+                                <property name="adjustment">fov_far</property>
+                                <property name="climb_rate">1</property>
+                                <signal name="value-changed" handler="set_spinbutton_fov_far" swapped="no"/>
+                              </object>
+                              <packing>
+                                <property name="expand">True</property>
+                                <property name="fill">True</property>
+                                <property name="position">2</property>
                               </packing>
                             </child>
                           </object>
@@ -823,19 +895,5 @@
         </child>
       </object>
     </child>
-  </object>
-  <object class="GtkAdjustment" id="fov_depth">
-    <property name="lower">1</property>
-    <property name="upper">5</property>
-    <property name="value">3</property>
-    <property name="step_increment">0.10000000000000001</property>
-    <property name="page_increment">0.5</property>
-  </object>
-  <object class="GtkAdjustment" id="fov_width">
-    <property name="lower">1</property>
-    <property name="upper">3</property>
-    <property name="value">1.5</property>
-    <property name="step_increment">0.10000000000000001</property>
-    <property name="page_increment">0.5</property>
   </object>
 </interface>

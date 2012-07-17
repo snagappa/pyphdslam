@@ -78,6 +78,9 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         self.covariances = np.repeat([1*np.eye(state_parameters["ndims"])], 
                                       state_parameters["nparticles"], 0)
         self.transition_matrix = np.array([np.eye(6)])
+        # Override probability of detection using own method
+        self.sensor_fov = featuredetector.sensors.camera_fov()
+        self.parameters.pd_fn.handle = self.camera_pd
         
     def get_states(self, rows=None, cols=None):
         if rows == None:
@@ -243,16 +246,24 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         #state_xyz = self.maps[0].parameters.obs_fn.parameters.parent_state_xyz
         #state_rpy = self.maps[0].parameters.obs_fn.parameters.parent_state_rpy
         state_rpy = np.array([0, 0, self.maps[0].parameters.obs_fn.parameters.parent_state_rpy[2]])
-        obs_cov = observation_set[:,3:].copy()
+        # Extract covariance
+        #obs_cov = observation_set[:,3:].copy()
+        # Extract states
         observation_set = observation_set[:,0:3].copy()
         #observation_set = np.array(observation_set[:, [1, 0, 2]], order='C')
         feature_abs_posn = np.array([self.weights[i]*featuredetector.tf.absolute(self.maps[i].parameters.obs_fn.parameters.parent_state_xyz, state_rpy, observation_set) for i in range(len(self.maps))])
         feature_abs_posn = feature_abs_posn.sum(axis=0)
         
-        print "Absolute (inverse):"
-        print feature_abs_posn
+        #print "Absolute (inverse):"
+        #print feature_abs_posn
         #print "state xyz:"
         #print state_xyz
+        
+        [self.maps[i].phdIterate(observation_set) for i in range(self.weights.shape[0])]
+        sum_weights = [self.maps[i].intensity() for i in range(self.weights.shape[0])]
+        print "individual map intensities:"
+        print sum_weights
+        
         
     def resample(self):
         if self.parameters.state_parameters["resample_threshold"] < 0:
@@ -286,6 +297,14 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         self.weights = resampled_weights
         self.states = resampled_states
         self.maps = resampled_maps
+        
+        
+    def camera_pd(self, states, parameters):
+        # Transform points to local frame
+        rel_landmarks = featuredetector.tf.relative(parameters.parent_state_xyz, 
+                                                    parameters.parent_state_rpy, 
+                                                    states.state())
+        return self.sensor_fov.is_visible(rel_landmarks).astype(np.float)*parameters.pd
         
         
 def feature_relative_position(vehicle_xyz, vehicle_rpy, features_xyz):
@@ -440,6 +459,7 @@ def g500_slam_fn_defs():
     birth_fn_parameters.obs2state = lambda x: np.array(x)
     birth_fn_parameters.parent_state_xyz = np.zeros(3)
     birth_fn_parameters.parent_state_rpy = np.zeros(3)
+    birth_fn_parameters.R = np.eye(3)
     birth_fn = fn_params(birth_fn_handle, birth_fn_parameters)
     
     # Survival/detection probability
@@ -452,6 +472,7 @@ def g500_slam_fn_defs():
     pd_fn_parameters.width = 2.0
     pd_fn_parameters.depth = 3.0
     pd_fn_parameters.height = 1.0
+    pd_fn_parameters.pd = 0.95
     pd_fn_parameters.parent_state_xyz = np.zeros(3)
     pd_fn_parameters.parent_state_rpy = np.zeros(3)
     pd_fn = fn_params(pd_fn_handle, pd_fn_parameters)
@@ -471,14 +492,18 @@ def g500_slam_fn_defs():
     
 
 def camera_pd(states, parameters):
-    parent_state = parameters.parent_state
     # Rotate the states by parent state orientation
+    featuredetector.tf.relative(parameters.parent_state_xyz, 
+                                parameters.parent_state_rpy, 
+                                states)
     
+
 def camera_birth(z, parameters):
     # Convert the relative z to absolute z
-    
+    abs_z = featuredetector.tf.absolute(parameters.parent_state_xyz, 
+                                parameters.parent_state_rpy, z)
     #
-    birth_states, birth_weights = gmphdfilter.measurement_birth(z, parameters)
+    birth_states, birth_weights = gmphdfilter.measurement_birth(abs_z, parameters)
     return birth_states, birth_weights
 
 ##############################################################################
