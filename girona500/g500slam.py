@@ -438,8 +438,6 @@ class G500_SLAM():
                 self.makePrediction(imu.header.stamp)
                 self.ros.last_update_time = imu.header.stamp
                 ###############################################################
-            #except rospy.ROSException:
-            #    code.interact(local=locals())
             finally:
                 self.__LOCK__.release()
             #self.publish_data()

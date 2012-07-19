@@ -30,7 +30,7 @@ g500_navigation module.
 
 import collections
 from lib.common import misctools, blas
-blas.SET_DEBUG(False)
+blas.SET_DEBUG(True)
 from lib.phdfilter.phdfilter import fn_params, PARAMETERS
 from lib.phdfilter import gmphdfilter
 from lib import phdslam
@@ -60,7 +60,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         # Force the state space to 6: x, y, z, vx, vy, vz
         # roll, pitch yaw + velocities must be fed from parent
         state_parameters["ndims"] = 6
-        state_parameters["nparticles"] = 2*state_parameters["ndims"] + 1
+        state_parameters["nparticles"] = 1#2*state_parameters["ndims"] + 1
         
         super(G500_PHDSLAM, self).__init__(
                             state_markov_predict_fn, state_obs_fn,
@@ -78,9 +78,11 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         self.covariances = np.repeat([1*np.eye(state_parameters["ndims"])], 
                                       state_parameters["nparticles"], 0)
         self.transition_matrix = np.array([np.eye(6)])
+        
         # Override probability of detection using own method
         self.sensor_fov = featuredetector.sensors.camera_fov()
         self.parameters.pd_fn.handle = self.camera_pd
+        self.parameters.clutter_fn.handle = self.camera_clutter
         
     def get_states(self, rows=None, cols=None):
         if rows == None:
@@ -261,6 +263,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         
         [self.maps[i].phdIterate(observation_set) for i in range(self.weights.shape[0])]
         sum_weights = [self.maps[i].intensity() for i in range(self.weights.shape[0])]
+        print "Average total intensity = ", np.mean(sum_weights)
         print "individual map intensities:"
         print sum_weights
         
@@ -306,7 +309,12 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
                                                     states.state())
         return self.sensor_fov.is_visible(rel_landmarks).astype(np.float)*parameters.pd
         
-        
+    def camera_clutter(self, observations, parameters):
+        return parameters.intensity*self.sensor_fov.z_prob(observations[:,0])
+        #return parameters.intensity*1/(1/3.0*
+        #    self.sensor_fov.fov_far_m*
+        #    self.sensor_fov.get_rect__half_width_height(self.sensor_fov.fov_far_m).prod())
+"""
 def feature_relative_position(vehicle_xyz, vehicle_rpy, features_xyz):
     if not features_xyz.shape[0]: return np.empty(0)
     relative_position = features_xyz - vehicle_xyz
@@ -334,6 +342,7 @@ def feature_absolute_position(vehicle_xyz, vehicle_rpy, features_xyz):
     
     absolute_position = blas.dgemv(rotation_matrix, features_xyz) + vehicle_xyz
     return absolute_position
+"""
 
 def g500_kf_update(weights, states, covs, obs_matrix, obs_noise, z):
     upd_weights = weights.copy()
@@ -408,7 +417,7 @@ def g500_slam_fn_defs():
     # that the information from the imu is perfect
     # We only need to estimate x,y,z. The roll, pitch and yaw must be fed
     # externally
-    state_parameters = {"nparticles":32,
+    state_parameters = {"nparticles":13,
                         "ndims":6,
                         "resample_threshold":-1}
     
@@ -445,9 +454,9 @@ def g500_slam_fn_defs():
     feature__state_update_fn = fn_params()
     
     # Clutter function
-    clutter_fn_handle = gmphdfilter.uniform_clutter
+    clutter_fn_handle = None#gmphdfilter.uniform_clutter
     clutter_fn_parameters = PARAMETERS()
-    clutter_fn_parameters.intensity = 2
+    clutter_fn_parameters.intensity = 0.01
     # Range should be the field of view of the sensor
     clutter_fn_parameters.range = [[-1, 1], [-1, 1], [-1, 1]]
     clutter_fn = fn_params(clutter_fn_handle, clutter_fn_parameters)
@@ -455,7 +464,7 @@ def g500_slam_fn_defs():
     # Birth function
     birth_fn_handle = camera_birth
     birth_fn_parameters = PARAMETERS()
-    birth_fn_parameters.intensity = 0.01
+    birth_fn_parameters.intensity = 0.2
     birth_fn_parameters.obs2state = lambda x: np.array(x)
     birth_fn_parameters.parent_state_xyz = np.zeros(3)
     birth_fn_parameters.parent_state_rpy = np.zeros(3)

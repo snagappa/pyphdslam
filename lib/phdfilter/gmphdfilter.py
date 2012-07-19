@@ -66,20 +66,21 @@ class GMSTATES(object):
             self._state_ = new_state.state().copy()
             self._covariance_ = new_state.covariance().copy()
         else:
-            self._state_ = np.append(self._state_, new_state.state())
+            self._state_ = np.append(self._state_, new_state.state(), axis=0)
             self._covariance_ = np.append(self._covariance_, 
-                                          new_state.covariance())
+                                          new_state.covariance(), axis=0)
+        
         
     def copy(self):
         state_copy = self.__class__(0)
         state_copy._state_ = self._state_.copy()
-        state_copy._covariance = self._covariance_
+        state_copy._covariance_ = self._covariance_.copy()
         return state_copy
     
     def select(self, idx_vector, INPLACE=True):
         fn_return_val = None
         if not INPLACE:
-            state_copy = self.__class__(0)
+            state_copy = self.copy()
         else:
             state_copy = self
         fn_return_val = state_copy
@@ -103,8 +104,12 @@ class GMSTATES(object):
         
     
     def __getitem__(self, index):
-        return GMSAMPLE(self._state_[index].copy(), 
-                        self._covariance_[index].copy())
+        if np.isscalar(index):
+            return GMSAMPLE(np.array([self._state_[index].copy()]), 
+                            np.array([self._covariance_[index].copy()]))
+        else:
+            return GMSAMPLE(self._state_[index].copy(), 
+                            self._covariance_[index].copy())
     
     def __setitem__(self, key, item):
         self._state_[key] = item[0]
@@ -167,62 +172,66 @@ class GMPHD(PHD):
         self._states_ = self.states.copy()
         self._weights_ = [self.weights*(1-detection_probability)]
         
-        # Scale the weights by detection probability 
-        #   -- same for all detection terms
-        self.weights.__imul__(detection_probability)
-        
         # SLAM,  step 1:
         slam_info.exp_sum__pd_predwt = np.exp(-self.weights.sum())
         
         # Split x and P out from the combined state vector
-        detected_states = self.states[detection_probability > 0.1]
+        detected_indices = detection_probability > 0.1
+        detected_states = self.states[detected_indices]
         x = detected_states.state
         P = detected_states.covariance
-        
-        # Part of the Kalman update is common to all observation-updates
-        x, P, kalman_info = kalmanfilter.kf_update(x, P, 
-                            np.array([self.parameters.obs_fn.parameters.H]), 
-                            np.array([self.parameters.obs_fn.parameters.R]), 
-                            None, INPLACE=True)#USE_NP=0)
+        # Scale the weights by detection probability 
+        weights = self.weights[detected_indices]*detection_probability[detected_indices]
         
         # SLAM, prep for step 2:
         slam_info.sum__clutter_with_pd_updwt = np.zeros(num_observations)
-        # Container for the updated states
-        new_gmstate = self.states.__class__(0)
-        # We need to update the states and find the updated weights
-        for (_observation_, obs_count) in zip(observation_set, 
-                                              range(num_observations)):
-            #new_x = copy.deepcopy(x)
-            # Apply the Kalman update to get the new state - update in-place
-            # and return the residuals
-            new_x, residuals = kalmanfilter.kf_update_x(x, kalman_info.pred_z, 
-                                        _observation_, kalman_info.kalman_gain,
-                                        INPLACE=False)
+        
+        if x.shape[0]:
+            # Part of the Kalman update is common to all observation-updates
+            x, P, kalman_info = kalmanfilter.kf_update(x, P, 
+                                np.array([self.parameters.obs_fn.parameters.H]), 
+                                np.array([self.parameters.obs_fn.parameters.R]), 
+                                None, INPLACE=True)#USE_NP=0)
+        
+        
+            # Container for the updated states
+            new_gmstate = self.states.__class__(0)
+            # We need to update the states and find the updated weights
+            for (_observation_, obs_count) in zip(observation_set, 
+                                                  range(num_observations)):
+                #new_x = copy.deepcopy(x)
+                # Apply the Kalman update to get the new state - update in-place
+                # and return the residuals
+                new_x, residuals = kalmanfilter.kf_update_x(x, kalman_info.pred_z, 
+                                            _observation_, kalman_info.kalman_gain,
+                                            INPLACE=False)
+                
+                # Calculate the weight of the Gaussians for this observation
+                # Calculate term in the exponent
+                x_pdf = np.exp(-0.5*np.power(
+                    blas.dgemv(kalman_info.inv_sqrt_S, residuals), 2).sum(axis=1))/ \
+                    np.sqrt(kalman_info.det_S*(2*np.pi)**z_dim) 
+                code.interact(local=locals())
+                new_weight = weights*x_pdf
+                # Normalise the weights
+                normalisation_factor = clutter_pdf[obs_count] + new_weight.sum()
+                new_weight /= normalisation_factor
+                # SLAM, step 2:
+                slam_info.sum__clutter_with_pd_updwt[obs_count] = \
+                                                            normalisation_factor
+                
+                # Create new state with new_x and P to add to _states_
+                new_gmstate.set(new_x, P)
+                self._states_.append(new_gmstate)
+                self._weights_ += [new_weight]
             
-            # Calculate the weight of the Gaussians for this observation
-            # Calculate term in the exponent
-            x_pdf = np.exp(-0.5*np.power(
-                blas.dgemv(kalman_info.inv_sqrt_S, residuals), 2).sum(axis=1))/ \
-                np.sqrt(kalman_info.det_S*(2*np.pi)**z_dim) 
-            
-            new_weight = self.weights*x_pdf
-            # Normalise the weights
-            normalisation_factor = clutter_pdf[obs_count] + new_weight.sum()
-            new_weight.__idiv__(normalisation_factor)
-            # SLAM, step 2:
-            slam_info.sum__clutter_with_pd_updwt[obs_count] = \
-                                                        normalisation_factor
-            
-            # Create new state with new_x and P to add to _states_
-            new_gmstate.set(new_x, P)
-            self._states_.append(new_gmstate)
-            self._weights_ += [new_weight]
+        else:
+            slam_info.sum__clutter_with_pd_updwt = np.array(clutter_pdf)
             
         self._weights_ = np.concatenate(self._weights_)
-        code.interact(local=locals())
         # SLAM, finalise:
         slam_info.likelihood = (slam_info.exp_sum__pd_predwt * 
-                                slam_info.sum__clutter_with_pd_predwt.prod())
+                                slam_info.sum__clutter_with_pd_updwt.prod())
         return slam_info
     
     def phdPrune(self):
@@ -238,7 +247,6 @@ class GMPHD(PHD):
             inds = inds[self.parameters.phd_parameters['max_terms']:]
             pruned_states.delete(inds, INPLACE=True)
             pruned_weights = np.delete(pruned_weights, inds)
-        
         self._states_.set( *pruned_states.members() )
         self._weights_ = pruned_weights
         
@@ -250,15 +258,13 @@ class GMPHD(PHD):
         result_wt_list = []
         result_state_list = []
         result_covariance_list = []
-        
         num_remaining_components = len(self._weights_)
         while num_remaining_components:
             max_wt_index = self._weights_.argmax()
-            
             max_wt_state = self._states_[max_wt_index]
             mahalanobis_dist = misctools.mahalanobis(max_wt_state.state, 
-                                                      max_wt_state.covariance, 
-                                                      self._states_.state())
+                                                     max_wt_state.covariance, 
+                                                     self._states_.state())
             merge_list_indices = np.where(mahalanobis_dist <= 
                           self.parameters.phd_parameters['merge_threshold'])[0]
             merge_list_states = self._states_[merge_list_indices] 
@@ -308,14 +314,19 @@ class GMPHD(PHD):
     def phdIterate(self, observations):
         # Predict existing states
         self.phdPredict()
+        
         # Update existing states
         self.phdUpdate(observations)
+        
         # Generate estimates
         estimates = self.phdEstimate()
+        
         # Prune low weight Gaussian components
         self.phdPrune()
+        
         # Merge components
         self.phdMerge()
+        
         # End of iteration call
         self.phdFlattenUpdate()
         

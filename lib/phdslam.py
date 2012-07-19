@@ -43,20 +43,26 @@ class GMPHD_SLAM_FEATURE(gmphdfilter.GMPHD):
         Performs a single iteration of the PHD filter except for the 
         prediction.
         """
+        
         # Update existing states
         slam_info = self.phdUpdate(observations)
+        
         # Generate estimates
         #estimates = self.phdEstimate()
         # Prune low weight Gaussian components
         self.phdPrune()
+        
         # Merge components
         self.phdMerge()
+        
         # End of iteration call
         self.phdFlattenUpdate()
+        
         # Create birth terms from measurements
         birth_states, birth_weights = self.phdGenerateBirth(observations)
         # Append birth terms to Gaussian mixture
         self.phdAppendBirth(birth_states, birth_weights)
+        
         #return estimates
         return slam_info
 

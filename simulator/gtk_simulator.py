@@ -67,7 +67,7 @@ class gtk_slam_sim:
         self.vehicle.visible_landmarks = STRUCT()
         self.vehicle.visible_landmarks.abs = np.empty(0)
         self.vehicle.visible_landmarks.rel = np.empty(0)
-        self.vehicle.visible_landmarks.fov = np.empty(0)
+        self.vehicle.visible_landmarks.fov_poly_vertices = np.empty(0)
         self.vehicle.LOCK = threading.Lock()
         
         # List of landmarks and waypoints
@@ -370,7 +370,7 @@ class gtk_slam_sim:
             # Translation to vehicle position
             north, east, depth = self.vehicle.north_east_depth
             vertices += np.array([east, north])
-            self.vehicle.visible_landmarks.fov = vertices
+            self.vehicle.visible_landmarks.fov_poly_vertices = vertices
             
             """
             north, east, depth = self.vehicle.north_east_depth
@@ -388,7 +388,7 @@ class gtk_slam_sim:
             vertices = np.dot(np.array([[cy, sy], [-sy, cy]]), vertices.T).T
             # Translation to vehicle position
             vertices += np.array([east, north])
-            self.vehicle.visible_landmarks.fov = vertices
+            self.vehicle.visible_landmarks.fov_poly_vertices = vertices
             
             # copy visible landmarks to self.vehicle.visible_landmarks.abs
             landmarks = np.array(self.scene.landmarks)
@@ -452,7 +452,7 @@ class gtk_slam_sim:
     
     def draw_visible_landmarks(self):
         # Draw fov
-        fov_vertices = self.vehicle.visible_landmarks.fov.copy()
+        fov_vertices = self.vehicle.visible_landmarks.fov_poly_vertices.copy()
         if fov_vertices.shape[0]:
             fov_vertices = np.vstack((fov_vertices, fov_vertices[0]))
             self.viewer.axis.plot(fov_vertices[:,0], fov_vertices[:,1])

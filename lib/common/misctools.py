@@ -33,11 +33,9 @@ def mahalanobis(x, P, y):
     Compute the Mahalanobis distance given x, P and y as 
     sqrt((x-y)'*inv(P)*(x-y)).
     """
-    residual = x.copy()
-    P_copy = P.copy()
-    blas.daxpy(-1.0, y, residual)
-    _, p_residual = blas.dposv(P_copy, residual, OVERWRITE_A=True)
-    return np.power(blas.ddot(residual, p_residual), 0.5)
+    residual = x-y
+    p_times_residual, _ = blas.dposv(P, residual, OVERWRITE_A=False)
+    return np.power(blas.ddot(residual, p_times_residual), 0.5)
     
     
 def merge_states(wt, x, P):
@@ -47,13 +45,18 @@ def merge_states(wt, x, P):
     """
     merged_wt = wt.sum()
     merged_x = np.sum(blas.daxpy(wt, x), 0)/merged_wt
+    """
     residual = x.copy()
     blas.daxpy(-1.0, np.array([merged_x]), residual)
+    """
+    residual = x - merged_x
     # Convert the residual to a column vector
-    residual.shape += (1,)
+    #residual.shape += (1,)
     P_copy = P.copy()
-    merged_P = sum(blas.dsyrk('l', residual, True, 1.0, wt, P_copy), 0)/merged_wt
-    return merged_wt, merged_x, merged_P
+    blas.dsyr('l', residual, 1.0, P_copy)
+    merged_P = np.array([(wt[:,np.newaxis,np.newaxis]*P_copy).sum(axis=0)/merged_wt], order='C')
+    blas.symmetrise(merged_P, 'l')
+    return merged_wt, merged_x, merged_P[0]
     
     
 def get_resample_index(weights, nparticles=-1):
@@ -122,6 +125,8 @@ def mvnpdf(x, mu, sigma):
     
     
 def sample_mn_cv(x, wt=None, SYMMETRISE=False):
+    if wt.shape[0] == 1:
+        return x[0].copy(), np.zeros((x.shape[1], x.shape[1]))
     if wt==None:
         wt = 1.0/x.shape[0]*np.ones(x.shape[0])
     else:

@@ -28,7 +28,6 @@ from scipy import weave
 import __blas_c_code__ as __c_code__
 #import collections
 
-
 default_dtype = np.float32
 
 def myarray(*args, **kw):
@@ -898,17 +897,16 @@ def dposv(A, b, INPLACE=False, OVERWRITE_A=False):
         assert_valid_vector(b, "b")
         if INPLACE:
             assert A.shape[0] in [1, b.shape[0]]
-    fn_return_val = ()
     if not OVERWRITE_A:
         A = A.copy()
     dpotrf(A, INPLACE=True)
     
     if not INPLACE:
-        x = b.copy()
+        x = dpotrs(A, b)
     else:
+        dpotrsx(A, b)
         x = b
-    x = dpotrsx(A, b)
-    fn_return_val += (x, A)
+    fn_return_val = (x, A)
     return fn_return_val
     
 

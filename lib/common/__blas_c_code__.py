@@ -1100,7 +1100,7 @@ class dgetrsx:
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
     extra_compile_args = []
-    python_vars = ["LU", "ipiv", "x"]
+    python_vars = ["LU", "ipiv", "b"]
     code = """
     int i, j, num_LU, num_x;
     int LU_rows, LU_cols, LU_offset, x_offset, ipiv_offset;
@@ -1116,10 +1116,10 @@ class dgetrsx:
     LU_rows = NLU[1];
     LU_offset = num_LU==1?0:LU_rows*LU_rows;
     ipiv_offset = num_LU==1?0:LU_rows;
-    num_x = Nx[0];
+    num_x = Nb[0];
     x_offset = LU_rows;
     
-    #pragma omp parallel shared(LU_rows, num_x, LU, LU_offset, x, x_offset, COPY_IPIV, ipiv, ipiv_offset) private(p, p_data, i, gsl_LU, gsl_x, j)
+    #pragma omp parallel shared(LU_rows, num_x, LU, LU_offset, b, x_offset, COPY_IPIV, ipiv, ipiv_offset) private(p, p_data, i, gsl_LU, gsl_x, j)
     {
     p = gsl_permutation_alloc (LU_rows);
     p_data = p->data;
@@ -1127,7 +1127,7 @@ class dgetrsx:
     #pragma omp for
     for (i=0; i<num_x; i++) {
         gsl_LU = gsl_matrix_view_array(LU+(i*LU_offset), LU_rows, LU_rows);
-        gsl_x = gsl_vector_view_array(x+(i*x_offset), LU_rows);
+        gsl_x = gsl_vector_view_array(b+(i*x_offset), LU_rows);
         if (!COPY_IPIV)
             p->data = (size_t*)(ipiv+(i*ipiv_offset));
         else
@@ -1283,7 +1283,7 @@ class dpotrsx:
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
     extra_compile_args = []
-    python_vars = ["cholA", "x"]
+    python_vars = ["cholA", "b"]
     code = """
     int i, num_A, num_x;
     int A_rows, A_cols, A_offset, x_offset;
@@ -1294,13 +1294,13 @@ class dpotrsx:
     A_rows = NcholA[1];
     A_offset = num_A==1?0:A_rows*A_rows;
     
-    num_x = Nx[0];
+    num_x = Nb[0];
     x_offset = A_rows;
     
-    #pragma omp parallel for shared(num_x, cholA, A_offset, A_rows, x, x_offset) private(i, gsl_cholA, gsl_x)
+    #pragma omp parallel for shared(num_x, cholA, A_offset, A_rows, b, x_offset) private(i, gsl_cholA, gsl_x)
     for (i=0; i<num_x; i++) {
         gsl_cholA = gsl_matrix_view_array(cholA+(i*A_offset), A_rows, A_rows);
-        gsl_x = gsl_vector_view_array(x+(i*x_offset), A_rows);
+        gsl_x = gsl_vector_view_array(b+(i*x_offset), A_rows);
         gsl_linalg_cholesky_svx (&gsl_cholA.matrix, &gsl_x.vector);
     }
     """
