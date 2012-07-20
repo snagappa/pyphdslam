@@ -86,8 +86,8 @@ class G500_SLAM():
         self.vehicle.altitude = 0.0
         
         # Initialise ROS stuff
-        self.name = name
         self.ros = PARAMETERS()
+        self.ros.name = name
         self.ros.last_update_time = rospy.Time.now()
         self.ros.NO_LOCK_ACQUIRE = 0
         self.init_ros()
@@ -147,6 +147,7 @@ class G500_SLAM():
         config.dvl_last_update = copy.copy(time_now)
         config.imu_last_update = copy.copy(time_now)
         config.svs_last_update = copy.copy(time_now)
+        config.map_last_update = copy.copy(time_now)
         config.dvl_init = False
         config.imu_init = False
         config.svs_init = False
@@ -183,9 +184,15 @@ class G500_SLAM():
             self.reset_navigation = rospy.Service('/slam_g500/set_navigation', 
                                                   SetNE, self.setNavigation)
             
-        # Create publisher
-        self.ros.nav_msg = NavSts()
-        self.ros.nav_sts_publisher = rospy.Publisher("/g500slam/nav_sts", NavSts)
+        # Create publishers
+        self.ros.nav = PARAMETERS()
+        self.ros.nav.msg = NavSts()
+        self.ros.nav.publisher = rospy.Publisher("/g500slam/nav_sts", NavSts)
+        # Publish landmarks
+        self.ros.map = PARAMETERS()
+        self.ros.map.msg = PointCloud2()
+        self.ros.map.publisher = rospy.Publisher("/g500slam/features", PointCloud2)
+        self.ros.map.helper = featuredetector.msgs.msgs(featuredetector.msgs.MSG_XYZ_COV)
         
         # Publish data every 500 ms
         rospy.timer.Timer(rospy.Duration(0.5), self.publish_data)
@@ -456,7 +463,9 @@ class G500_SLAM():
             self.slam_worker.update_with_features(slam_features, 
                                                   pcl_msg.header.stamp)
             #self.publish_data()
-            self.slam_worker.resample()
+            #self.slam_worker.resample()
+            self.config.map_last_update = copy.copy(pcl_msg.header.stamp)
+            self.ros.last_update_time = pcl_msg.header.stamp
         finally:
             self.__LOCK__.release()
         
@@ -493,7 +502,7 @@ class G500_SLAM():
     
     def publish_data(self, *args, **kwargs):
         if self.config.init:
-            nav_msg = self.ros.nav_msg
+            nav_msg = self.ros.nav.msg
             est_state = self.slam_worker._state_estimate_()
             est_cov = self.slam_worker._state_covariance_()
             angle = tf.transformations.euler_from_quaternion(
@@ -501,7 +510,7 @@ class G500_SLAM():
             
             # Create header
             nav_msg.header.stamp = self.ros.last_update_time
-            nav_msg.header.frame_id = "g500slam"
+            nav_msg.header.frame_id = self.ros.name
             child_frame_id = "world"
                        
             #Fill Nav status topic
@@ -526,7 +535,7 @@ class G500_SLAM():
             
             nav_msg.status = np.uint8(np.log10(self.ros.NO_LOCK_ACQUIRE+1))
             #Publish topics
-            self.ros.nav_sts_publisher.publish(nav_msg)
+            self.ros.nav.publisher.publish(nav_msg)
             
             #Publish TF
             br = tf.TransformBroadcaster()
@@ -541,10 +550,28 @@ class G500_SLAM():
                 nav_msg.header.stamp, 
                 nav_msg.header.frame_id, 
                 child_frame_id)
-        else :
-            self.ros.last_update_time = rospy.Time.now()
-            self.init = True
-    
+                
+            ##
+            # Publish landmarks now
+            map_estimate = self.slam_worker._map_estimate_()
+            map_states = map_estimate.state.state
+            print map_states
+            print map_states.shape
+            map_covs = map_estimate.state.covariance
+            diag_cov = np.array([np.diag(map_covs[i]) for i in range(map_covs.shape[0])])
+            print diag_cov
+            print diag_cov.shape
+            #print map_states
+            #print map_covs
+            pcl_msg = self.ros.map.helper.to_pcl(rospy.Time.now(), np.hstack((map_states, diag_cov)))
+            pcl_msg.header.frame_id = self.ros.name
+            # and publish visible landmarks
+            self.ros.map.publisher.publish(pcl_msg)
+        #else :
+        #    self.ros.last_update_time = rospy.Time.now()
+        #    self.config.init = True
+        
+        
     def debug_print(self, *args, **kwargs):
         print "Weights: "
         #print self.slam_worker.states

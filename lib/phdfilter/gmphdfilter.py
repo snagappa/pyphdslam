@@ -107,6 +107,8 @@ class GMSTATES(object):
         if np.isscalar(index):
             return GMSAMPLE(np.array([self._state_[index].copy()]), 
                             np.array([self._covariance_[index].copy()]))
+        elif not len(index):
+            return GMSAMPLE(np.empty((0)), np.empty((0)))
         else:
             return GMSAMPLE(self._state_[index].copy(), 
                             self._covariance_[index].copy())
@@ -148,8 +150,6 @@ class GMPHD(PHD):
                                     ps_fn, pd_fn, estimate_fn, phd_parameters)
     
     def phdUpdate(self, observation_set):
-        # Container for slam parent update
-        slam_info = PARAMETERS()
         num_observations = observation_set.shape[0]
         if num_observations:
             z_dim = observation_set.shape[1]
@@ -172,19 +172,13 @@ class GMPHD(PHD):
         self._states_ = self.states.copy()
         self._weights_ = [self.weights*(1-detection_probability)]
         
-        # SLAM,  step 1:
-        slam_info.exp_sum__pd_predwt = np.exp(-self.weights.sum())
-        
         # Split x and P out from the combined state vector
-        detected_indices = detection_probability > 0.1
+        detected_indices = detection_probability > 0
         detected_states = self.states[detected_indices]
         x = detected_states.state
         P = detected_states.covariance
         # Scale the weights by detection probability 
         weights = self.weights[detected_indices]*detection_probability[detected_indices]
-        
-        # SLAM, prep for step 2:
-        slam_info.sum__clutter_with_pd_updwt = np.zeros(num_observations)
         
         if x.shape[0]:
             # Part of the Kalman update is common to all observation-updates
@@ -211,28 +205,19 @@ class GMPHD(PHD):
                 x_pdf = np.exp(-0.5*np.power(
                     blas.dgemv(kalman_info.inv_sqrt_S, residuals), 2).sum(axis=1))/ \
                     np.sqrt(kalman_info.det_S*(2*np.pi)**z_dim) 
-                code.interact(local=locals())
+                #code.interact(local=locals())
                 new_weight = weights*x_pdf
                 # Normalise the weights
                 normalisation_factor = clutter_pdf[obs_count] + new_weight.sum()
                 new_weight /= normalisation_factor
-                # SLAM, step 2:
-                slam_info.sum__clutter_with_pd_updwt[obs_count] = \
-                                                            normalisation_factor
                 
                 # Create new state with new_x and P to add to _states_
                 new_gmstate.set(new_x, P)
                 self._states_.append(new_gmstate)
                 self._weights_ += [new_weight]
             
-        else:
-            slam_info.sum__clutter_with_pd_updwt = np.array(clutter_pdf)
-            
         self._weights_ = np.concatenate(self._weights_)
-        # SLAM, finalise:
-        slam_info.likelihood = (slam_info.exp_sum__pd_predwt * 
-                                slam_info.sum__clutter_with_pd_updwt.prod())
-        return slam_info
+        
     
     def phdPrune(self):
         if (self.parameters.phd_parameters['elim_threshold'] <= 0):
@@ -289,10 +274,10 @@ class GMPHD(PHD):
         
     
     def phdFlattenUpdate(self):
-        self.states = self._states_.copy()
-        self.weights = self._weights_.copy()
-        self._states_ = self._states_.__class__(0)
-        self._weights_ = np.empty(0, dtype=float)
+        self.states = self._states_
+        self.weights = self._weights_
+        #self._states_ = self._states_.__class__(0)
+        #self._weights_ = np.empty(0, dtype=float)
     
     
     def phdEstimate(self):

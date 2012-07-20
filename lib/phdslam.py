@@ -295,7 +295,7 @@ class PHDSLAM(object):
         
     def _map_estimate_(self):
         max_weight_idx = np.argmax(self.weights)
-        self._estimate_.map = self.maps[max_weight_idx]
+        self._estimate_.map = self.maps[max_weight_idx].phdEstimate()
         return self._estimate_.map
     
     def resample(self):

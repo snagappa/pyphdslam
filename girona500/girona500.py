@@ -48,7 +48,129 @@ SLAM_FN_DEFS = collections.namedtuple("SLAM_FN_DEFS",
                 feature_likelihood_fn feature__state_update_fn clutter_fn \
                 birth_fn ps_fn pd_fn feature_estimate_fn feature_parameters")
 
-
+class G500_SLAM_FEATURE(gmphdfilter.GMPHD):
+    def __init__(self, *args, **kwargs):
+        super(G500_SLAM_FEATURE, self).__init__(*args, **kwargs)
+    
+    def phdUpdate(self, observation_set):
+        # Container for slam parent update
+        slam_info = PARAMETERS()
+        num_observations = observation_set.shape[0]
+        if num_observations:
+            z_dim = observation_set.shape[1]
+        else:
+            z_dim = 0
+        
+        if not self.weights.shape[0]:
+            self._states_ = self.states.copy()
+            self._weights_ = self.weights.copy()
+            return
+        
+        detection_probability = self.parameters.pd_fn.handle(self.states, 
+                                            self.parameters.pd_fn.parameters)
+        #clutter_pdf = [self.clutter_fn.handle(_observation_, 
+        #                                      self.clutter_fn.parameters) \
+        #               for _observation_ in observation_set]
+        clutter_pdf = self.parameters.clutter_fn.handle(observation_set, 
+                                        self.parameters.clutter_fn.parameters)
+        # Account for missed detection
+        self._states_ = self.states.copy()
+        self._weights_ = [self.weights*(1-detection_probability)]
+        
+        # SLAM,  step 1:
+        slam_info.exp_sum__pd_predwt = np.exp(-self.weights.sum())
+        
+        # Split x and P out from the combined state vector
+        detected_indices = detection_probability > 0.1
+        detected_states = self.states[detected_indices]
+        x = detected_states.state
+        P = detected_states.covariance
+        # Scale the weights by detection probability 
+        weights = self.weights[detected_indices]*detection_probability[detected_indices]
+        
+        # SLAM, prep for step 2:
+        slam_info.sum__clutter_with_pd_updwt = np.zeros(num_observations)
+        
+        if x.shape[0]:
+            # Part of the Kalman update is common to all observation-updates
+            x, P, kalman_info = kf_update(x, P, 
+                                np.array([self.parameters.obs_fn.parameters.H]), 
+                                np.array([self.parameters.obs_fn.parameters.R]), 
+                                None, INPLACE=True)#USE_NP=0)
+        
+        
+            # Container for the updated states
+            new_gmstate = self.states.__class__(0)
+            # Predicted observation from the current states
+            pred_z = featuredetector.tf.relative(self.parameters.obs_fn.parameters.parent_state_xyz, 
+                                                 self.parameters.obs_fn.parameters.parent_state_rpy, 
+                                                 x)
+            # We need to update the states and find the updated weights
+            for (_observation_, obs_count) in zip(observation_set, 
+                                                  range(num_observations)):
+                #new_x = copy.deepcopy(x)
+                # Apply the Kalman update to get the new state - update in-place
+                # and return the residuals
+                new_x, residuals = kf_update_x(x, pred_z, 
+                                            _observation_, kalman_info.kalman_gain,
+                                            INPLACE=False)
+                
+                # Calculate the weight of the Gaussians for this observation
+                # Calculate term in the exponent
+                x_pdf = np.exp(-0.5*np.power(
+                    blas.dgemv(kalman_info.inv_sqrt_S, residuals), 2).sum(axis=1))/ \
+                    np.sqrt(kalman_info.det_S*(2*np.pi)**z_dim) 
+                #code.interact(local=locals())
+                new_weight = weights*x_pdf
+                # Normalise the weights
+                normalisation_factor = clutter_pdf[obs_count] + new_weight.sum()
+                new_weight /= normalisation_factor
+                # SLAM, step 2:
+                slam_info.sum__clutter_with_pd_updwt[obs_count] = \
+                                                            normalisation_factor
+                
+                # Create new state with new_x and P to add to _states_
+                new_gmstate.set(new_x, P)
+                self._states_.append(new_gmstate)
+                self._weights_ += [new_weight]
+            
+        else:
+            slam_info.sum__clutter_with_pd_updwt = np.array(clutter_pdf)
+            
+        self._weights_ = np.concatenate(self._weights_)
+        # SLAM, finalise:
+        slam_info.likelihood = (slam_info.exp_sum__pd_predwt * 
+                                slam_info.sum__clutter_with_pd_updwt.prod())
+        return slam_info
+        
+    def phdIterate(self, observations):
+        """
+        Performs a single iteration of the PHD filter except for the 
+        prediction.
+        """
+        
+        # Update existing states
+        slam_info = self.phdUpdate(observations)
+        
+        # Generate estimates
+        #estimates = self.phdEstimate()
+        # Prune low weight Gaussian components
+        self.phdPrune()
+        
+        # Merge components
+        self.phdMerge()
+        
+        # End of iteration call
+        self.phdFlattenUpdate()
+        
+        # Create birth terms from measurements
+        birth_states, birth_weights = self.phdGenerateBirth(observations)
+        # Append birth terms to Gaussian mixture
+        self.phdAppendBirth(birth_states, birth_weights)
+        
+        #return estimates
+        return slam_info
+        
 class G500_PHDSLAM(phdslam.PHDSLAM):
     def __init__(self, state_markov_predict_fn, state_obs_fn,
                  state_likelihood_fn, state__state_update_fn,
@@ -60,7 +182,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         # Force the state space to 6: x, y, z, vx, vy, vz
         # roll, pitch yaw + velocities must be fed from parent
         state_parameters["ndims"] = 6
-        state_parameters["nparticles"] = 1#2*state_parameters["ndims"] + 1
+        state_parameters["nparticles"] = 2*state_parameters["ndims"] + 1
         
         super(G500_PHDSLAM, self).__init__(
                             state_markov_predict_fn, state_obs_fn,
@@ -84,6 +206,18 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         self.parameters.pd_fn.handle = self.camera_pd
         self.parameters.clutter_fn.handle = self.camera_clutter
         
+    def create_default_feature(self):
+        return G500_SLAM_FEATURE(self.parameters.feature_markov_predict_fn,
+                                  self.parameters.feature_obs_fn,
+                                  self.parameters.feature_likelihood_fn,
+                                  self.parameters.feature__state_update_fn,
+                                  self.parameters.clutter_fn,
+                                  self.parameters.birth_fn,
+                                  self.parameters.ps_fn,
+                                  self.parameters.pd_fn,
+                                  self.parameters.feature_estimate_fn,
+                                  self.parameters.feature_parameters)
+    
     def get_states(self, rows=None, cols=None):
         if rows == None:
             rows = range(self.parameters.state_parameters["nparticles"])
@@ -107,18 +241,19 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         process_noise = np.array([
             self.parameters.state_markov_predict_fn.parameters.process_noise])
         
-        # u is assumed to be ordered as [roll, pitch, yaw]
-        r, p, y = 0, 1, 2
-        # Evaluate cosine and sine of roll, pitch, yaw
-        c = np.cos(ctrl_input)
-        s = np.sin(ctrl_input)
-        
-        # Specify the rotation matrix
-        # See http://en.wikipedia.org/wiki/Rotation_matrix
-        rot_mat = delta_t * np.array(
-                [[c[p]*c[y], -c[r]*s[y]+s[r]*s[p]*c[y], s[r]*s[y]+c[r]*s[p]*c[y] ],
-                 [c[p]*s[y], c[r]*c[y]+s[r]*s[p]*s[y], -s[r]*c[y]+c[r]*s[p]*s[y] ],
-                 [-s[p], s[r]*c[p], c[r]*c[p] ]])
+        ## u is assumed to be ordered as [roll, pitch, yaw]
+        #r, p, y = 0, 1, 2
+        ## Evaluate cosine and sine of roll, pitch, yaw
+        #c = np.cos(ctrl_input)
+        #s = np.sin(ctrl_input)
+        #
+        ## Specify the rotation matrix
+        ## See http://en.wikipedia.org/wiki/Rotation_matrix
+        #rot_mat = delta_t * np.array(
+        #        [[c[p]*c[y], -c[r]*s[y]+s[r]*s[p]*c[y], s[r]*s[y]+c[r]*s[p]*c[y] ],
+        #         [c[p]*s[y], c[r]*c[y]+s[r]*s[p]*s[y], -s[r]*c[y]+c[r]*s[p]*s[y] ],
+        #         [-s[p], s[r]*c[p], c[r]*c[p] ]])
+        rot_mat = delta_t * featuredetector.tf.rotation_matrix(ctrl_input)
         # Transition matrix
         #trans_mat = np.array([ np.vstack(( np.hstack((np.eye(3), rot_mat)),
         #                           np.hstack((np.zeros((3,3)), np.eye(3))) )) ])
@@ -162,6 +297,8 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
                                           sc_process_noise)
         
         states_xyz = np.array(pred_states[:,0:3])
+        #Calculate the rotation matrix to store for the map update
+        rot_mat = featuredetector.tf.rotation_matrix(ctrl_input)
         # Copy the predicted states to the "parent state" attribute and 
         # perform a prediction for the map
         for i in range(self.parameters.state_parameters["nparticles"]):
@@ -170,6 +307,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
                     "parent_state_xyz", states_xyz[i])
             setattr(self.maps[i].parameters.obs_fn.parameters, 
                     "parent_state_rpy", ctrl_input)
+            self.maps[i].parameters.obs_fn.H = rot_mat
             setattr(self.maps[i].parameters.pd_fn.parameters, 
                     "parent_state_xyz", states_xyz[i])
             setattr(self.maps[i].parameters.pd_fn.parameters, 
@@ -464,7 +602,7 @@ def g500_slam_fn_defs():
     # Birth function
     birth_fn_handle = camera_birth
     birth_fn_parameters = PARAMETERS()
-    birth_fn_parameters.intensity = 0.2
+    birth_fn_parameters.intensity = 0.01
     birth_fn_parameters.obs2state = lambda x: np.array(x)
     birth_fn_parameters.parent_state_xyz = np.zeros(3)
     birth_fn_parameters.parent_state_rpy = np.zeros(3)
