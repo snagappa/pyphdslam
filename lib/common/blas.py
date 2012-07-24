@@ -196,7 +196,7 @@ def isnestedstruct(itis_info):
         return False
 
 
-def _np_generate(np_function, itis):
+def _np_generate_(np_function, itis):
     consistent_type = itis.consistent_type()
     if consistent_type == list:
         y = np_function(itis.shape, dtype=itis.base_type).tolist()
@@ -210,13 +210,13 @@ def _np_generate(np_function, itis):
     return y
     
 def empty(itis):
-    return _np_generate(np.empty, itis)
+    return _np_generate_(np.empty, itis)
 
 def zeros(itis):
-    return _np_generate(np.zeros, itis)
+    return _np_generate_(np.zeros, itis)
 
 def ones(itis):
-    return _np_generate(np.ones, itis)
+    return _np_generate_(np.ones, itis)
 
     
 def _py_copy(x):
@@ -1205,5 +1205,6 @@ def blas_init():
     dpotrs(cholA, y, x)
     dpotrsx(cholA, y)
     dpotri(A)
+    dtrtri(A, UPLO, INPLACE=False)
     symmetrise(A, UPLO)
     del A, B, C, x, y, UPLO, TR_A, TR_B, SIDE, alpha, beta, LU, ipiv, signum

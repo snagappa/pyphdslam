@@ -389,7 +389,10 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         # Extract covariance
         #obs_cov = observation_set[:,3:].copy()
         # Extract states
-        observation_set = observation_set[:,0:3].copy()
+        if observation_set.shape[0]:
+            observation_set = observation_set[:,0:3].copy()
+        else:
+            observation_set = np.empty(0)
         #observation_set = np.array(observation_set[:, [1, 0, 2]], order='C')
         feature_abs_posn = np.array([self.weights[i]*featuredetector.tf.absolute(self.maps[i].parameters.obs_fn.parameters.parent_state_xyz, state_rpy, observation_set) for i in range(len(self.maps))])
         feature_abs_posn = feature_abs_posn.sum(axis=0)
@@ -401,9 +404,9 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         
         [self.maps[i].phdIterate(observation_set) for i in range(self.weights.shape[0])]
         sum_weights = [self.maps[i].intensity() for i in range(self.weights.shape[0])]
-        print "Average total intensity = ", np.mean(sum_weights)
-        print "individual map intensities:"
-        print sum_weights
+        print "Tracking ", np.mean(sum_weights), " landmarks."
+        #print "individual map intensities:"
+        #print sum_weights
         
         
     def resample(self):
@@ -448,7 +451,9 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         return self.sensor_fov.is_visible(rel_landmarks).astype(np.float)*parameters.pd
         
     def camera_clutter(self, observations, parameters):
-        return parameters.intensity*self.sensor_fov.z_prob(observations[:,0])
+        if observations.shape[0]:
+            observations = observations[:,0]
+        return parameters.intensity*self.sensor_fov.z_prob(observations)
         #return parameters.intensity*1/(1/3.0*
         #    self.sensor_fov.fov_far_m*
         #    self.sensor_fov.get_rect__half_width_height(self.sensor_fov.fov_far_m).prod())

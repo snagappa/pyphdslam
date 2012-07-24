@@ -555,14 +555,8 @@ class G500_SLAM():
             # Publish landmarks now
             map_estimate = self.slam_worker._map_estimate_()
             map_states = map_estimate.state.state
-            print map_states
-            print map_states.shape
             map_covs = map_estimate.state.covariance
             diag_cov = np.array([np.diag(map_covs[i]) for i in range(map_covs.shape[0])])
-            print diag_cov
-            print diag_cov.shape
-            #print map_states
-            #print map_covs
             pcl_msg = self.ros.map.helper.to_pcl(rospy.Time.now(), np.hstack((map_states, diag_cov)))
             pcl_msg.header.frame_id = self.ros.name
             # and publish visible landmarks

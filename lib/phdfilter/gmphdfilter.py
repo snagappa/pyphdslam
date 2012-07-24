@@ -65,11 +65,12 @@ class GMSTATES(object):
         if self._state_.shape[0] == 0:# or self._state_.shape[1] == 0:
             self._state_ = new_state.state().copy()
             self._covariance_ = new_state.covariance().copy()
+        elif new_state._state_.shape[0] == 0:
+            return
         else:
             self._state_ = np.append(self._state_, new_state.state(), axis=0)
             self._covariance_ = np.append(self._covariance_, 
                                           new_state.covariance(), axis=0)
-        
         
     def copy(self):
         state_copy = self.__class__(0)
@@ -281,13 +282,15 @@ class GMPHD(PHD):
     
     
     def phdEstimate(self):
-        total_intensity = sum(self._weights_)
-        num_targets = int(round(total_intensity))
-        
-        inds = np.flipud(self._weights_.argsort())
+        total_intensity = sum(self.weights)
+        try:
+            num_targets = int(round(total_intensity))
+        except:
+            print total_intensity
+        inds = np.flipud(self.weights.argsort())
         inds = inds[0:num_targets]
-        est_state = self._states_[inds]
-        est_weight = self._weights_[inds]
+        est_state = self.states[inds]
+        est_weight = self.weights[inds]
         
         # Create empty structure to store state and weight
         estimate = lambda:0

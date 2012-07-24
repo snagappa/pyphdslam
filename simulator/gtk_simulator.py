@@ -35,6 +35,7 @@ import matplotlib.nxutils as nxutils
 import roslib
 roslib.load_manifest("g500slam")
 from nav_msgs.msg import Odometry
+from auv_msgs.msg import NavSts
 from control_g500.srv import GotoSrv, GotoSrvRequest
 import rospy
 import tf
@@ -43,6 +44,7 @@ import featuredetector
 
 import threading
 import numpy as np
+import copy
 
 class STRUCT(object): pass
 
@@ -69,6 +71,13 @@ class gtk_slam_sim:
         self.vehicle.visible_landmarks.rel = np.empty(0)
         self.vehicle.visible_landmarks.fov_poly_vertices = np.empty(0)
         self.vehicle.LOCK = threading.Lock()
+        
+        # Container for estimated vehicle position and landmarks
+        self.estimator = STRUCT()
+        self.estimator.north_east_depth = np.zeros(3)
+        self.estimator.roll_pitch_yaw = np.zeros(3)
+        self.estimator.fov_poly_vertices = np.empty(0)
+        self.estimator.landmarks = np.empty(0)
         
         # List of landmarks and waypoints
         self.scene = STRUCT()
@@ -164,6 +173,11 @@ class gtk_slam_sim:
         #                                  PointField.FLOAT32, 1) for 
         #                        (_field_name_, _field_offset_) in zip(field_name, field_offset)]
         #self.ros.pcl_header = PointCloud2().header
+        
+        # Subscribe to vehicle NavSts as well as the published estimated landmarks
+        rospy.Subscriber("/g500slam/nav_sts", NavSts, self.estimator_update_position)
+        rospy.Subscriber("/g500slam/features", PointCloud2, self.estimator_update_landmarks)
+        
         
     def on_MainWindow_delete_event(self, widget, event):
             gtk.main_quit()
@@ -336,15 +350,52 @@ class gtk_slam_sim:
         self.print_position()
         self.update_visible_landmarks()
         
+    def estimator_update_position(self, nav):
+        #print "updating position"
+        # received a new position, update the viewer
+        position = np.array([nav.position.north,
+                             nav.position.east,
+                             nav.position.depth])
+        self.estimator.north_east_depth = position
+        
+        orientation = np.array([nav.orientation.roll, 
+                                nav.orientation.pitch, 
+                                nav.orientation.yaw])
+        self.estimator.roll_pitch_yaw = orientation
+        self.print_position()
+        
+        # Update field of view
+        vertices = self.vehicle.sensor_fov.fov_vertices_2d()
+        # Rotate by the yaw
+        cy = np.cos(self.estimator.roll_pitch_yaw[2])
+        sy = np.sin(self.estimator.roll_pitch_yaw[2])
+        vertices = np.dot(np.array([[cy, sy], [-sy, cy]]), vertices.T).T
+        # Translation to vehicle position
+        north, east, depth = position
+        vertices += np.array([east, north])
+        self.estimator.fov_poly_vertices = vertices
+        
     def print_position(self):
         north, east, depth = np.round(self.vehicle.north_east_depth, 2)
-        text_xyz = ("north : " + "%.2f" % north + "\n" +
+        e_north, e_east, e_depth = np.round(self.estimator.north_east_depth, 2)
+        text_xyz = ("True:\n" +
+                    "north : " + "%.2f" % north + "\n" +
                     "east  : " + "%.2f" % east + "\n" +
-                    "depth : " + "%.2f" % depth)
+                    "depth : " + "%.2f" % depth + "\n" + "\n\n"
+                    "Estimated:\n" + 
+                    "north : " + "%.2f" % e_north + "\n" +
+                    "east  : " + "%.2f" % e_east + "\n" +
+                    "depth : " + "%.2f" % e_depth)
         roll, pitch, yaw = np.round(self.vehicle.roll_pitch_yaw, 2)
-        text_rpy = ("roll  : " + "%.2f" % roll + "\n" +
+        e_roll, e_pitch, e_yaw = np.round(self.estimator.roll_pitch_yaw, 2)
+        text_rpy = ("True:\n" +
+                    "roll  : " + "%.2f" % roll + "\n" +
                     "pitch : " + "%.2f" % pitch + "\n" +
-                    "yaw   : " + "%.2f" % yaw)
+                    "yaw   : " + "%.2f" % yaw + "\n" + "\n\n" +
+                    "Estimated:\n" +
+                    "roll  : " + "%.2f" % e_roll + "\n" +
+                    "pitch : " + "%.2f" % e_pitch + "\n" +
+                    "yaw   : " + "%.2f" % e_yaw)
         
         self.viewer.textview.vehicle_xyz.get_buffer().set_text(text_xyz)
         self.viewer.textview.vehicle_rpy.get_buffer().set_text(text_rpy)
@@ -414,18 +465,22 @@ class gtk_slam_sim:
         ##relative_position = girona500.feature_relative_position(vehicle_xyz, self.vehicle.orientation, features)
         #self.publish_visible_landmarks()
     
+    def estimator_update_landmarks(self, pcl_msg):
+        self.estimator.landmarks = self.ros.pcl_helper.from_pcl(pcl_msg)
+        
     def publish_visible_landmarks(self, *args, **kwargs):
         self.update_visible_landmarks()
         rel_landmarks = self.vehicle.visible_landmarks.rel
-        if not rel_landmarks.shape[0]: return
-        
-        # Convert xyz to PointCloud message
-        #pcl_msg = pointclouds.xyz_array_to_pointcloud2(rel_landmarks, rospy.Time.now(), "slamsim")
-        # Convert xyz to PointCloud message with (diagonal) covariance
-        rel_landmarks = np.hstack((rel_landmarks, np.ones(rel_landmarks.shape)))
-        #self.ros.pcl_header.stamp = rospy.Time.now()
-        #self.ros.pcl_header.frame_id = "slamsim"
-        #pcl_msg = pc2wrapper.create_cloud(self.ros.pcl_header, self.ros.pcl_fields, rel_landmarks)
+        if rel_landmarks.shape[0]:
+            # Convert xyz to PointCloud message
+            #pcl_msg = pointclouds.xyz_array_to_pointcloud2(rel_landmarks, rospy.Time.now(), "slamsim")
+            # Convert xyz to PointCloud message with (diagonal) covariance
+            rel_landmarks = np.hstack((rel_landmarks, np.ones(rel_landmarks.shape)))
+            #self.ros.pcl_header.stamp = rospy.Time.now()
+            #self.ros.pcl_header.frame_id = "slamsim"
+            #pcl_msg = pc2wrapper.create_cloud(self.ros.pcl_header, self.ros.pcl_fields, rel_landmarks)
+        else:
+            rel_landmarks = np.empty(0)
         pcl_msg = self.ros.pcl_helper.to_pcl(rospy.Time.now(), rel_landmarks)
         pcl_msg.header.frame_id = self.ros.name
         # and publish visible landmarks
@@ -442,25 +497,42 @@ class gtk_slam_sim:
         self.viewer.DRAW_CANVAS = not self.viewer.DRAW_CANVAS
         
     def draw_vehicle(self):
+        # True position from simulator
         yaw = self.vehicle.roll_pitch_yaw[2]
-        north, east, down = self.vehicle.north_east_depth
+        north, east, depth = self.vehicle.north_east_depth
         arrow_width = 0.015*self.viewer.size.width
         arrow_length = 0.05*self.viewer.size.height
         self.viewer.axis.arrow(east, north, arrow_length*np.sin(yaw), 
                                arrow_length*np.cos(yaw), width=arrow_width,
-                               length_includes_head=True)
-    
-    def draw_visible_landmarks(self):
+                               length_includes_head=True, color='b')
         # Draw fov
         fov_vertices = self.vehicle.visible_landmarks.fov_poly_vertices.copy()
         if fov_vertices.shape[0]:
             fov_vertices = np.vstack((fov_vertices, fov_vertices[0]))
-            self.viewer.axis.plot(fov_vertices[:,0], fov_vertices[:,1])
+            self.viewer.axis.plot(fov_vertices[:,0], fov_vertices[:,1], c='b')
+        
+        # Estimation from navigator
+        yaw = self.estimator.roll_pitch_yaw[2]
+        north, east, depth = self.estimator.north_east_depth
+        self.viewer.axis.arrow(east, north, arrow_length*np.sin(yaw), 
+                               arrow_length*np.cos(yaw), width=arrow_width,
+                               length_includes_head=True, color='r')
+        fov_vertices = self.estimator.fov_poly_vertices.copy()
+        if fov_vertices.shape[0]:
+            fov_vertices = np.vstack((fov_vertices, fov_vertices[0]))
+            self.viewer.axis.plot(fov_vertices[:,0], fov_vertices[:,1], c='r')
+            
+    def draw_visible_landmarks(self):
         # Plot visible landmarks
         points = np.array(self.vehicle.visible_landmarks.abs)
         if points.shape[0]:
             self.viewer.axis.scatter(points[:,1], points[:,0], s=36, marker='o')
-    
+        # Plot estimated landmarks
+        points = self.estimator.landmarks
+        print points
+        if points.shape[0]:
+            self.viewer.axis.scatter(points[:,1], points[:,0], s=36, marker='*', c='g')
+        
     def draw(self, *args, **kwargs):
         if not self.viewer.DRAW_CANVAS:
             self.viewer.canvas.draw_idle()

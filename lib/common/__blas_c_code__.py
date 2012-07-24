@@ -64,6 +64,7 @@ gsl_blas_headers = """
 #include <gsl/gsl_cblas.h>
 #include <gsl/gsl_vector.h>
 #include <gsl/gsl_matrix.h>
+#include <gsl/gsl_errno.h>
 
 extern "C" {
      int clapack_dtrtri ( const enum CBLAS_ORDER Order, const enum CBLAS_UPLO Uplo, const enum CBLAS_DIAG Diag, const int N, double *A, const int lda );
@@ -1230,16 +1231,28 @@ class dpotrf:
     int i, num_A;
     int A_rows, A_cols, A_offset;
     gsl_matrix_view gsl_A;
+    gsl_error_handler_t *gsl_default_error_handler;
+    gsl_default_error_handler = gsl_set_error_handler_off();
+    int gsl_error_value;
+    int error_occurred = 0;
     
     num_A = NA[0];
     A_rows = NA[1]; A_cols = NA[2];
     A_offset = A_rows*A_cols;
     
-    #pragma omp parallel for shared(num_A, A, A_offset, A_rows) private(i, gsl_A)
+    #pragma omp parallel for shared(num_A, error_occurred, A, A_offset, A_rows) private(i, gsl_A, gsl_error_value)
     for (i=0; i<num_A; i++) {
-        gsl_A = gsl_matrix_view_array(A+(i*A_offset), A_rows, A_rows);
-        gsl_linalg_cholesky_decomp (&gsl_A.matrix);
+        if (!error_occurred) {
+            gsl_A = gsl_matrix_view_array(A+(i*A_offset), A_rows, A_rows);
+            gsl_error_value = gsl_linalg_cholesky_decomp (&gsl_A.matrix);
+            if (gsl_error_value == GSL_EDOM) {
+                error_occurred = 1;
+                #pragma omp flush (error_occurred)
+            }
+        }
     }
+    exception_occurred = error_occurred;
+    gsl_set_error_handler(gsl_default_error_handler);
     """
 
 
@@ -1256,6 +1269,10 @@ class dpotrs:
     int A_rows, A_cols, A_offset, b_offset, x_offset;
     gsl_matrix_view gsl_cholA;
     gsl_vector_view gsl_x, gsl_b;
+    gsl_error_handler_t *gsl_default_error_handler;
+    gsl_default_error_handler = gsl_set_error_handler_off();
+    int gsl_error_value;
+    int error_occurred = 0;
     
     num_A = NcholA[0];
     A_rows = NcholA[1];
@@ -1266,13 +1283,21 @@ class dpotrs:
     num_x = Nx[0];
     x_offset = A_rows;
     
-    #pragma omp parallel for shared(num_x, cholA, A_offset, A_rows, b, b_offset, x, x_offset) private(i, gsl_cholA, gsl_b, gsl_x)
+    #pragma omp parallel for shared(num_x, error_occurred, cholA, A_offset, A_rows, b, b_offset, x, x_offset) private(i, gsl_cholA, gsl_b, gsl_x, gsl_error_value)
     for (i=0; i<num_x; i++) {
-        gsl_cholA = gsl_matrix_view_array(cholA+(i*A_offset), A_rows, A_rows);
-        gsl_b = gsl_vector_view_array(b+(i*b_offset), A_rows);
-        gsl_x = gsl_vector_view_array(x+(i*x_offset), A_rows);
-        gsl_linalg_cholesky_solve (&gsl_cholA.matrix, &gsl_b.vector, &gsl_x.vector);
+        if (!error_occurred) {
+            gsl_cholA = gsl_matrix_view_array(cholA+(i*A_offset), A_rows, A_rows);
+            gsl_b = gsl_vector_view_array(b+(i*b_offset), A_rows);
+            gsl_x = gsl_vector_view_array(x+(i*x_offset), A_rows);
+            gsl_error_value = gsl_linalg_cholesky_solve (&gsl_cholA.matrix, &gsl_b.vector, &gsl_x.vector);
+            if (gsl_error_value == GSL_EDOM) {
+                error_occurred = 1;
+                #pragma omp flush (error_occurred)
+            }
+        }
     }
+    exception_occurred = error_occurred;
+    gsl_set_error_handler(gsl_default_error_handler);
     """
     
     
@@ -1289,6 +1314,10 @@ class dpotrsx:
     int A_rows, A_cols, A_offset, x_offset;
     gsl_matrix_view gsl_cholA;
     gsl_vector_view gsl_x;
+    gsl_error_handler_t *gsl_default_error_handler;
+    gsl_default_error_handler = gsl_set_error_handler_off();
+    int gsl_error_value;
+    int error_occurred = 0;
     
     num_A = NcholA[0];
     A_rows = NcholA[1];
@@ -1297,12 +1326,20 @@ class dpotrsx:
     num_x = Nb[0];
     x_offset = A_rows;
     
-    #pragma omp parallel for shared(num_x, cholA, A_offset, A_rows, b, x_offset) private(i, gsl_cholA, gsl_x)
+    #pragma omp parallel for shared(num_x, error_occurred, cholA, A_offset, A_rows, b, x_offset) private(i, gsl_cholA, gsl_x, gsl_error_value)
     for (i=0; i<num_x; i++) {
-        gsl_cholA = gsl_matrix_view_array(cholA+(i*A_offset), A_rows, A_rows);
-        gsl_x = gsl_vector_view_array(b+(i*x_offset), A_rows);
-        gsl_linalg_cholesky_svx (&gsl_cholA.matrix, &gsl_x.vector);
+        if (!error_occurred) {
+            gsl_cholA = gsl_matrix_view_array(cholA+(i*A_offset), A_rows, A_rows);
+            gsl_x = gsl_vector_view_array(b+(i*x_offset), A_rows);
+            gsl_error_value = gsl_linalg_cholesky_svx (&gsl_cholA.matrix, &gsl_x.vector);
+            if (gsl_error_value == GSL_EDOM) {
+                error_occurred = 1;
+                #pragma omp flush (error_occurred)
+            }
+        }
     }
+    exception_occurred = error_occurred;
+    gsl_set_error_handler(gsl_default_error_handler);
     """
     
     
@@ -1318,16 +1355,28 @@ class dpotri:
     int i, j, num_A;
     int A_rows, A_cols, A_offset;
     gsl_matrix_view gsl_A;
+    gsl_error_handler_t *gsl_default_error_handler;
+    gsl_default_error_handler = gsl_set_error_handler_off();
+    int gsl_error_value;
+    int error_occurred = 0;
     
     num_A = NA[0];
     A_rows = NA[1];
     A_offset = A_rows*A_rows;
     
-    #pragma omp parallel for shared(num_A, A, A_offset, A_rows) private(i, gsl_A)
+    #pragma omp parallel for shared(num_A, error_occurred, A, A_offset, A_rows) private(i, gsl_A, gsl_error_value)
     for (i=0; i<num_A; i++) {
-        gsl_A = gsl_matrix_view_array(A+(i*A_offset), A_rows, A_rows);
-        gsl_linalg_cholesky_invert (&gsl_A.matrix);
+        if (!error_occurred) {
+            gsl_A = gsl_matrix_view_array(A+(i*A_offset), A_rows, A_rows);
+            gsl_error_value = gsl_linalg_cholesky_invert (&gsl_A.matrix);
+            if (gsl_error_value == GSL_EDOM) {
+                error_occurred = 1;
+                #pragma omp flush (error_occurred)
+            }
+        }
     }
+    exception_occurred = error_occurred;
+    gsl_set_error_handler(gsl_default_error_handler);
     """
     
     
@@ -1336,7 +1385,7 @@ class dtrtri:
     def __call__(self):
         return python_vars, code, support_code, libs
     support_code = omp_headers+gsl_blas_headers
-    libraries = lptf77blas+lgomp+llapack+lgsl + ["cblas"]
+    libraries = lptf77blas+lgomp+llapack+lgsl + ["cblas", "lapack_atlas"] 
     extra_compile_args = []
     python_vars = ["A"]
     code = """
@@ -1346,16 +1395,28 @@ class dtrtri:
     int info;
     uplo = 'l';
     diag = 'n';
+    gsl_error_handler_t *gsl_default_error_handler;
+    gsl_default_error_handler = gsl_set_error_handler_off();
+    int gsl_error_value;
+    int error_occurred = 0;
     
     num_A = NA[0];
     A_rows = NA[1];
     A_offset = A_rows*A_rows;
     
-    #pragma omp parallel for shared(num_A, uplo, diag, A_rows, A, A_offset) private(i, info)
+    #pragma omp parallel for shared(num_A, error_occurred, uplo, diag, A_rows, A, A_offset) private(i, info, gsl_error_value)
     for (i=0; i<num_A; i++) {
-        //dtrtri_(&uplo, &diag, &A_rows, A+(i*A_offset), &A_rows, &info);
-        clapack_dtrtri(CblasRowMajor, CblasLower, CblasNonUnit, A_rows, A+(i*A_offset), A_rows);
+        if (!error_occurred) {
+            //dtrtri_(&uplo, &diag, &A_rows, A+(i*A_offset), &A_rows, &info);
+            gsl_error_value = clapack_dtrtri(CblasRowMajor, CblasLower, CblasNonUnit, A_rows, A+(i*A_offset), A_rows);
+            if (gsl_error_value == GSL_EDOM) {
+                error_occurred = 1;
+                #pragma omp flush (error_occurred)
+            }
+        }
     }
+    exception_occurred = error_occurred;
+    gsl_set_error_handler(gsl_default_error_handler);
     """
 ###############################################################################
 class symmetrise:
