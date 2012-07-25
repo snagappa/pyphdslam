@@ -84,7 +84,13 @@ class STATES(object):
         return state_copy
     
     def select(self, idx_vector, INPLACE=False):
-        fn_return_val = None
+        pass
+        """
+        if not INPLACE:
+            state_copy = self.copy()
+        else:
+            state_copy = self
+        fn_return_val = state_copy
         if not INPLACE:
             state_copy = self.__class__(0)
             state_copy._state_ = self._state_[idx_vector]
@@ -92,7 +98,7 @@ class STATES(object):
         else:
             self._state_ = self._state_[idx_vector]
         return fn_return_val
-        
+        """
     
     def delete(self, idx_vector, INPLACE=True):
         fn_return_val = None
@@ -200,7 +206,7 @@ class PHD(object):
     
     def phdPredict(self):
         survival_probability = self.parameters.ps_fn.handle(self.states, self.parameters.ps_fn.parameters)
-        self.weights.__imul__(survival_probability)
+        self.weights *= survival_probability
         self.states = self.parameters.markov_predict_fn.handle(self.states, 
                                 self.parameters.markov_predict_fn.parameters)
     

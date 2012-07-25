@@ -88,6 +88,8 @@ def kf_update_cov(covariance, H, R, INPLACE=True):
     blas.dgemm(H, p_ht, C=chol_S)
     # Compute the Cholesky decomposition
     blas.dpotrf(chol_S, True)
+    # Select the lower triangle (set the upper triangle to zero)
+    blas.mktril(chol_S)
     # Compute the determinant
     diag_vec = np.array([np.diag(chol_S[i]) for i in range(chol_S.shape[0])])
     det_S = diag_vec.prod(1)**2

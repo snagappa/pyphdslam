@@ -1418,6 +1418,7 @@ class dtrtri:
     exception_occurred = error_occurred;
     gsl_set_error_handler(gsl_default_error_handler);
     """
+
 ###############################################################################
 class symmetrise:
     def __call__(self):
@@ -1438,7 +1439,7 @@ class symmetrise:
     }
     """
     support_code = omp_headers+helper_code+gsl_blas_headers
-    libraries = lgomp+lgsl
+    libraries = lgomp
     extra_compile_args = []
     python_vars = ["A", "UPLO"]
     code = """
@@ -1472,7 +1473,87 @@ class symmetrise:
     }
     """
 
-
+###############################################################################
+class mktril:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    helper_code = """
+    inline void mktril(int M, int N, double *A) {
+        int i, j;
+        for (i=0; i<M; i++)
+            for (j=i+1; j<N; j++)
+                A[i*N+j] = 0;
+    }
+    """
+    support_code = omp_headers+helper_code
+    libraries = lgomp
+    extra_compile_args = []
+    python_vars = ["A"]
+    code = """
+    int i, num_A, tid, nthreads;
+    int nrows, ncols, A_offset;
+    
+    num_A = NA[0];
+    nrows = NA[1];
+    ncols = NA[2];
+    A_offset = nrows*ncols;
+    
+    #pragma omp parallel private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_A, nrows, ncols, A, A_offset) private(i)
+    for (i=0; i<num_A; i++) {
+        mktril(nrows, ncols, A+(i*A_offset));
+    }
+    """
+    
+###############################################################################
+class mktriu:
+    def __call__(self):
+        return python_vars, code, support_code, libs
+    helper_code = """
+    inline void mktriu(int M, int N, double *A) {
+        int i, j;
+        for (i=1; i<M; i++)
+            for (j=0; j<i; j++)
+                A[i*N+j] = 0;
+    }
+    """
+    support_code = omp_headers+helper_code
+    libraries = lgomp
+    extra_compile_args = []
+    python_vars = ["A"]
+    code = """
+    int i, num_A, tid, nthreads;
+    int nrows, ncols, A_offset;
+    
+    num_A = NA[0];
+    nrows = NA[1];
+    ncols = NA[2];
+    A_offset = nrows*ncols;
+    
+    #pragma omp parallel private(i, tid)
+    {
+    tid = omp_get_thread_num();
+    if (tid==0) {
+        nthreads = omp_get_num_threads();
+        // std::cout << "Using " << nthreads << " OMP threads" << std::endl;
+    }
+    }
+    
+    #pragma omp parallel for \
+        shared(num_A, nrows, ncols, A, A_offset) private(i)
+    for (i=0; i<num_A; i++) {
+        mktriu(nrows, ncols, A+(i*A_offset));
+    }
+    """
 ###############################################################################
 ###############################################################################
 class ldgemv:

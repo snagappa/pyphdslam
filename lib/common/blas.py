@@ -53,7 +53,8 @@ __blas_fns_list__ = ["ddot", "dnrm2", "dasum", "idamax", "daxpy", "dscal",
                      "dcopy", "dgemv", "dtrmv", "dtrsv", "dsymv", "dger", 
                      "dsyr", "dgemm", "dsymm", "dsyrk", "dgetrf", "dgetrs", 
                      "dgetrsx", "dgetri", "dgetrdet", "dpotrf", "dpotrs", 
-                     "dpotrsx", "dpotri", "dtrtri", "symmetrise"]
+                     "dpotrsx", "dpotri", "dtrtri", "symmetrise", "mktril", 
+                     "mktriu"]
 
 def blas_weaver(subroutine_string):
     subroutine = getattr(__c_code__, subroutine_string)
@@ -964,6 +965,21 @@ def symmetrise(A, UPLO):
     #             support_code=blas_c_code.symmetrise.support_code,
     #             extra_compile_args=blas_c_code.EXTRA_COMPILE_ARGS)
     
+def mktril(A):
+    """
+    Given a matrix A, zero the strictly upper triangular portion of the matrix.
+    """
+    if DEBUG:
+        assert_valid_matrix(A, "A")
+    exec blas_exec_cmd["mktril"]
+    
+def mktriu(A):
+    """
+    Given a matrix A, zero the strictly upper triangular portion of the matrix.
+    """
+    if DEBUG:
+        assert_valid_matrix(A, "A")
+    exec blas_exec_cmd["mktriu"]
 
 
 def test_ddot(num_elements=1000, num_dims=4):
@@ -1207,4 +1223,6 @@ def blas_init():
     dpotri(A)
     dtrtri(A, UPLO, INPLACE=False)
     symmetrise(A, UPLO)
+    mktril(A)
+    mktriu(A)
     del A, B, C, x, y, UPLO, TR_A, TR_B, SIDE, alpha, beta, LU, ipiv, signum

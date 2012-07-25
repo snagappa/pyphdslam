@@ -40,6 +40,7 @@ import rospy
 import code
 from lib.common.kalmanfilter import kf_predict_cov, kf_update, kf_update_cov, kf_update_x
 import featuredetector
+import copy
 
 SLAM_FN_DEFS = collections.namedtuple("SLAM_FN_DEFS", 
                 "state_markov_predict_fn state_obs_fn state_likelihood_fn \
@@ -52,6 +53,14 @@ class G500_SLAM_FEATURE(gmphdfilter.GMPHD):
     def __init__(self, *args, **kwargs):
         super(G500_SLAM_FEATURE, self).__init__(*args, **kwargs)
     
+    def phdPredict(self):
+        #print type(self.states._state_)
+        if self.states._covariance_.shape[0]:
+            extra_cov = 0.1*np.eye(3)
+            self.states._covariance_ += extra_cov[np.newaxis, :, :]
+        #self.states._covariance_ += self.parameters.markov_predict_fn.handle(self.states, 
+        #                        self.parameters.markov_predict_fn.parameters)
+
     def phdUpdate(self, observation_set):
         # Container for slam parent update
         slam_info = PARAMETERS()
@@ -97,8 +106,7 @@ class G500_SLAM_FEATURE(gmphdfilter.GMPHD):
                                 np.array([self.parameters.obs_fn.parameters.H]), 
                                 np.array([self.parameters.obs_fn.parameters.R]), 
                                 None, INPLACE=True)#USE_NP=0)
-        
-        
+                
             # Container for the updated states
             new_gmstate = self.states.__class__(0)
             # Predicted observation from the current states
@@ -120,7 +128,7 @@ class G500_SLAM_FEATURE(gmphdfilter.GMPHD):
                 x_pdf = np.exp(-0.5*np.power(
                     blas.dgemv(kalman_info.inv_sqrt_S, residuals), 2).sum(axis=1))/ \
                     np.sqrt(kalman_info.det_S*(2*np.pi)**z_dim) 
-                #code.interact(local=locals())
+                
                 new_weight = weights*x_pdf
                 # Normalise the weights
                 normalisation_factor = clutter_pdf[obs_count] + new_weight.sum()
@@ -143,6 +151,7 @@ class G500_SLAM_FEATURE(gmphdfilter.GMPHD):
                                 slam_info.sum__clutter_with_pd_updwt.prod())
         return slam_info
         
+    
     def phdIterate(self, observations):
         """
         Performs a single iteration of the PHD filter except for the 
@@ -165,6 +174,7 @@ class G500_SLAM_FEATURE(gmphdfilter.GMPHD):
         
         # Create birth terms from measurements
         birth_states, birth_weights = self.phdGenerateBirth(observations)
+        self.phdPredict()
         # Append birth terms to Gaussian mixture
         self.phdAppendBirth(birth_states, birth_weights)
         
@@ -200,6 +210,10 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         self.covariances = np.repeat([1*np.eye(state_parameters["ndims"])], 
                                       state_parameters["nparticles"], 0)
         self.transition_matrix = np.array([np.eye(6)])
+        
+        # Override survival probability
+        #self.parameters.ps_fn.handle = self.landmark_ps
+        #self.parameters.feature_markov_predict_fn.handle = self.landmark_predict
         
         # Override probability of detection using own method
         self.sensor_fov = featuredetector.sensors.camera_fov()
@@ -241,32 +255,8 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         process_noise = np.array([
             self.parameters.state_markov_predict_fn.parameters.process_noise])
         
-        ## u is assumed to be ordered as [roll, pitch, yaw]
-        #r, p, y = 0, 1, 2
-        ## Evaluate cosine and sine of roll, pitch, yaw
-        #c = np.cos(ctrl_input)
-        #s = np.sin(ctrl_input)
-        #
-        ## Specify the rotation matrix
-        ## See http://en.wikipedia.org/wiki/Rotation_matrix
-        #rot_mat = delta_t * np.array(
-        #        [[c[p]*c[y], -c[r]*s[y]+s[r]*s[p]*c[y], s[r]*s[y]+c[r]*s[p]*c[y] ],
-        #         [c[p]*s[y], c[r]*c[y]+s[r]*s[p]*s[y], -s[r]*c[y]+c[r]*s[p]*s[y] ],
-        #         [-s[p], s[r]*c[p], c[r]*c[p] ]])
         rot_mat = delta_t * featuredetector.tf.rotation_matrix(ctrl_input)
-        # Transition matrix
-        #trans_mat = np.array([ np.vstack(( np.hstack((np.eye(3), rot_mat)),
-        #                           np.hstack((np.zeros((3,3)), np.eye(3))) )) ])
         trans_mat[0,0:3,3:] = rot_mat
-        ## Add white Gaussian noise to the predicted states
-        # Compute scaling for the noise
-        #scale_matrix = np.array([np.vstack((rot_mat*delta_t/2, delta_t*np.eye(3)))])
-        
-        # Compute the process noise as scale_matrix*process_noise*scale_matrix'
-        #sc_process_noise = blas.dgemm(scale_matrix, 
-        #               blas.dgemm(process_noise, scale_matrix, 
-        #                          TRANSPOSE_B=True, beta=0.0), beta=0.0)[0]
-        #sc_process_noise += delta_t/10*np.eye(6)
         
         scale_matrix = np.vstack((rot_mat*delta_t/2, delta_t*np.eye(3)))
         sc_process_noise = np.dot(scale_matrix, np.dot(process_noise, scale_matrix.T)).squeeze() + delta_t/10*np.eye(6)
@@ -442,6 +432,15 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         self.states = resampled_states
         self.maps = resampled_maps
         
+    def landmark_ps(self, states, parameters):
+        ps = np.ones(states._state_.shape[0])
+        return ps
+    
+    def landmark_predict(self, states, parameters):
+        if states._covariance_.shape[0]:
+            extra_cov = 1e-3*np.eye(3)
+            states._covariance_ += extra_cov[np.newaxis,:,:]
+            return states
         
     def camera_pd(self, states, parameters):
         # Transform points to local frame
@@ -568,7 +567,7 @@ def g500_slam_fn_defs():
     # Parameters for the PHD filter
     feature_parameters = {"max_terms":100, 
                           "elim_threshold":1e-4, 
-                          "merge_threshold":4,
+                          "merge_threshold":3,
                           "ndims":3}
     ndims = feature_parameters["ndims"]
     
@@ -607,7 +606,7 @@ def g500_slam_fn_defs():
     # Birth function
     birth_fn_handle = camera_birth
     birth_fn_parameters = PARAMETERS()
-    birth_fn_parameters.intensity = 0.01
+    birth_fn_parameters.intensity = 0.001
     birth_fn_parameters.obs2state = lambda x: np.array(x)
     birth_fn_parameters.parent_state_xyz = np.zeros(3)
     birth_fn_parameters.parent_state_rpy = np.zeros(3)
@@ -624,7 +623,7 @@ def g500_slam_fn_defs():
     pd_fn_parameters.width = 2.0
     pd_fn_parameters.depth = 3.0
     pd_fn_parameters.height = 1.0
-    pd_fn_parameters.pd = 0.95
+    pd_fn_parameters.pd = 0.98
     pd_fn_parameters.parent_state_xyz = np.zeros(3)
     pd_fn_parameters.parent_state_rpy = np.zeros(3)
     pd_fn = fn_params(pd_fn_handle, pd_fn_parameters)

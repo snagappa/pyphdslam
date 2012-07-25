@@ -529,7 +529,6 @@ class gtk_slam_sim:
             self.viewer.axis.scatter(points[:,1], points[:,0], s=36, marker='o')
         # Plot estimated landmarks
         points = self.estimator.landmarks
-        print points
         if points.shape[0]:
             self.viewer.axis.scatter(points[:,1], points[:,0], s=36, marker='*', c='g')
         

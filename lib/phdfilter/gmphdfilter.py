@@ -79,7 +79,6 @@ class GMSTATES(object):
         return state_copy
     
     def select(self, idx_vector, INPLACE=True):
-        fn_return_val = None
         if not INPLACE:
             state_copy = self.copy()
         else:
@@ -92,7 +91,6 @@ class GMSTATES(object):
         
     
     def delete(self, idx_vector, INPLACE=True):
-        fn_return_val = None
         if not INPLACE:
             state_copy = self.__class__(0)
         else:
@@ -206,7 +204,7 @@ class GMPHD(PHD):
                 x_pdf = np.exp(-0.5*np.power(
                     blas.dgemv(kalman_info.inv_sqrt_S, residuals), 2).sum(axis=1))/ \
                     np.sqrt(kalman_info.det_S*(2*np.pi)**z_dim) 
-                #code.interact(local=locals())
+                
                 new_weight = weights*x_pdf
                 # Normalise the weights
                 normalisation_factor = clutter_pdf[obs_count] + new_weight.sum()
@@ -283,14 +281,15 @@ class GMPHD(PHD):
     
     def phdEstimate(self):
         total_intensity = sum(self.weights)
-        try:
-            num_targets = int(round(total_intensity))
-        except:
-            print total_intensity
+        num_targets = int(round(total_intensity))
+        #if num_targets:
         inds = np.flipud(self.weights.argsort())
         inds = inds[0:num_targets]
         est_state = self.states[inds]
         est_weight = self.weights[inds]
+        #else:
+        #    est_state = GMSTATES(0)
+        #    est_weight = np.zeros(0)
         
         # Create empty structure to store state and weight
         estimate = lambda:0
