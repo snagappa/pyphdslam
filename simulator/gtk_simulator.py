@@ -475,7 +475,7 @@ class gtk_slam_sim:
             # Convert xyz to PointCloud message
             #pcl_msg = pointclouds.xyz_array_to_pointcloud2(rel_landmarks, rospy.Time.now(), "slamsim")
             # Convert xyz to PointCloud message with (diagonal) covariance
-            rel_landmarks = np.hstack((rel_landmarks, np.ones(rel_landmarks.shape)))
+            rel_landmarks = np.hstack((rel_landmarks, 0.1*np.ones(rel_landmarks.shape)))
             #self.ros.pcl_header.stamp = rospy.Time.now()
             #self.ros.pcl_header.frame_id = "slamsim"
             #pcl_msg = pc2wrapper.create_cloud(self.ros.pcl_header, self.ros.pcl_fields, rel_landmarks)

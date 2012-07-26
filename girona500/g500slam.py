@@ -564,6 +564,8 @@ class G500_SLAM():
             pcl_msg.header.frame_id = self.ros.name
             # and publish visible landmarks
             self.ros.map.publisher.publish(pcl_msg)
+            #print "Landmarks at: "
+            #print map_states
         #else :
         #    self.ros.last_update_time = rospy.Time.now()
         #    self.config.init = True

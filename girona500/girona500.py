@@ -113,6 +113,8 @@ class G500_SLAM_FEATURE(gmphdfilter.GMPHD):
             pred_z = featuredetector.tf.relative(self.parameters.obs_fn.parameters.parent_state_xyz, 
                                                  self.parameters.obs_fn.parameters.parent_state_rpy, 
                                                  x)
+            print "PREDICTED Z:"
+            print pred_z
             # We need to update the states and find the updated weights
             for (_observation_, obs_count) in zip(observation_set, 
                                                   range(num_observations)):
@@ -259,7 +261,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         trans_mat[0,0:3,3:] = rot_mat
         
         scale_matrix = np.vstack((rot_mat*delta_t/2, delta_t*np.eye(3)))
-        sc_process_noise = np.dot(scale_matrix, np.dot(process_noise, scale_matrix.T)).squeeze() + delta_t/10*np.eye(6)
+        sc_process_noise = np.dot(scale_matrix, np.dot(process_noise, scale_matrix.T)).squeeze() #+ delta_t/10*np.eye(6)
         return trans_mat, sc_process_noise
     
     def predict(self, ctrl_input, predict_to_time):
@@ -583,7 +585,7 @@ def g500_slam_fn_defs():
     feature_obs_fn_handle = None
     feature_obs_fn_parameters = PARAMETERS()
     feature_obs_fn_parameters.H = np.eye(ndims)
-    feature_obs_fn_parameters.R = np.eye(ndims)
+    feature_obs_fn_parameters.R = 0.1*np.eye(ndims)
     feature_obs_fn_parameters.parent_state_xyz = np.zeros(3)
     feature_obs_fn_parameters.parent_state_rpy = np.zeros(3)
     feature_obs_fn = fn_params(feature_obs_fn_handle, 
@@ -610,7 +612,7 @@ def g500_slam_fn_defs():
     birth_fn_parameters.obs2state = lambda x: np.array(x)
     birth_fn_parameters.parent_state_xyz = np.zeros(3)
     birth_fn_parameters.parent_state_rpy = np.zeros(3)
-    birth_fn_parameters.R = np.eye(3)
+    birth_fn_parameters.R = 0.1*np.eye(3)
     birth_fn = fn_params(birth_fn_handle, birth_fn_parameters)
     
     # Survival/detection probability

@@ -285,8 +285,12 @@ class GMPHD(PHD):
         #if num_targets:
         inds = np.flipud(self.weights.argsort())
         inds = inds[0:num_targets]
-        est_state = self.states[inds]
+        est_state = self.states.select(inds, False)
         est_weight = self.weights[inds]
+        # Discard states with low weight
+        valid_idx = np.where(est_weight>0.5)[0]
+        est_state = est_state[valid_idx]
+        est_weight = est_weight[valid_idx]
         #else:
         #    est_state = GMSTATES(0)
         #    est_weight = np.zeros(0)
