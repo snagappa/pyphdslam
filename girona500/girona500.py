@@ -113,8 +113,8 @@ class G500_SLAM_FEATURE(gmphdfilter.GMPHD):
             pred_z = featuredetector.tf.relative(self.parameters.obs_fn.parameters.parent_state_xyz, 
                                                  self.parameters.obs_fn.parameters.parent_state_rpy, 
                                                  x)
-            print "PREDICTED Z:"
-            print pred_z
+            #print "PREDICTED Z:"
+            #print pred_z
             # We need to update the states and find the updated weights
             for (_observation_, obs_count) in zip(observation_set, 
                                                   range(num_observations)):
@@ -124,7 +124,7 @@ class G500_SLAM_FEATURE(gmphdfilter.GMPHD):
                 new_x, residuals = kf_update_x(x, pred_z, 
                                             _observation_, kalman_info.kalman_gain,
                                             INPLACE=False)
-                
+                code.interact(local=locals())
                 # Calculate the weight of the Gaussians for this observation
                 # Calculate term in the exponent
                 x_pdf = np.exp(-0.5*np.power(
@@ -194,7 +194,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         # Force the state space to 6: x, y, z, vx, vy, vz
         # roll, pitch yaw + velocities must be fed from parent
         state_parameters["ndims"] = 6
-        state_parameters["nparticles"] = 2*state_parameters["ndims"] + 1
+        state_parameters["nparticles"] = 1#2*state_parameters["ndims"] + 1
         
         super(G500_PHDSLAM, self).__init__(
                             state_markov_predict_fn, state_obs_fn,
@@ -620,7 +620,7 @@ def g500_slam_fn_defs():
     ps_fn_parameters = PARAMETERS()
     ps_fn_parameters.ps = 1
     ps_fn = fn_params(ps_fn_handle, ps_fn_parameters)
-    pd_fn_handle = camera_pd
+    pd_fn_handle = None
     pd_fn_parameters = PARAMETERS()
     pd_fn_parameters.width = 2.0
     pd_fn_parameters.depth = 3.0
@@ -644,11 +644,11 @@ def g500_slam_fn_defs():
                         feature_estimate_fn, feature_parameters)
     
 
-def camera_pd(states, parameters):
-    # Rotate the states by parent state orientation
-    featuredetector.tf.relative(parameters.parent_state_xyz, 
-                                parameters.parent_state_rpy, 
-                                states)
+#def camera_pd(states, parameters):
+#    # Rotate the states by parent state orientation
+#    featuredetector.tf.relative(parameters.parent_state_xyz, 
+#                                parameters.parent_state_rpy, 
+#                                states)
     
 
 def camera_birth(z, parameters):

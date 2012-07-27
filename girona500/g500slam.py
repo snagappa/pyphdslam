@@ -162,18 +162,17 @@ class G500_SLAM():
             print "Creating ROS subscriptions..."
             # Create Subscriber
             rospy.Subscriber("/navigation_g500/teledyne_explorer_dvl", 
-                             TeledyneExplorerDvl, self.updateTeledyneExplorerDvl,
-                             queue_size=1)
+                             TeledyneExplorerDvl, self.updateTeledyneExplorerDvl)
             rospy.Subscriber("/navigation_g500/valeport_sound_velocity", 
                              ValeportSoundVelocity, 
                              self.updateValeportSoundVelocity, queue_size=1)
             rospy.Subscriber("/navigation_g500/imu", Imu, self.updateImu)
             if config.gps_update :
                 rospy.Subscriber("/navigation_g500/fastrax_it_500_gps", 
-                                 FastraxIt500Gps, self.updateGps, queue_size=1)
+                                 FastraxIt500Gps, self.updateGps)
             ## Subscribe to visiona slam-features node
             rospy.Subscriber("/slamsim/features", PointCloud2, 
-                             self.update_features, queue_size=1)
+                             self.update_features)
             # Subscribe to sonar slam features node for
             #rospy.Subscriber("/slam_features/fls_pcl", PointCloud2, 
             #                 self.update_features)

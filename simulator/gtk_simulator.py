@@ -45,6 +45,8 @@ import featuredetector
 import threading
 import numpy as np
 import copy
+import code
+
 
 class STRUCT(object): pass
 
@@ -339,14 +341,18 @@ class gtk_slam_sim:
         position = np.array([odom.pose.pose.position.x,
                              odom.pose.pose.position.y,
                              odom.pose.pose.position.z])
-        self.vehicle.north_east_depth = position
         
         euler_from_quaternion = tf.transformations.euler_from_quaternion
         orientation = euler_from_quaternion([odom.pose.pose.orientation.x,
                                              odom.pose.pose.orientation.y,
                                              odom.pose.pose.orientation.z,
                                              odom.pose.pose.orientation.w])
-        self.vehicle.roll_pitch_yaw = np.array(orientation)
+        self.vehicle.LOCK.acquire()
+        try:
+            self.vehicle.north_east_depth = position
+            self.vehicle.roll_pitch_yaw = np.array(orientation)
+        finally:
+            self.vehicle.LOCK.release()
         self.print_position()
         self.update_visible_landmarks()
         
@@ -401,6 +407,8 @@ class gtk_slam_sim:
         self.viewer.textview.vehicle_rpy.get_buffer().set_text(text_rpy)
     
     def update_visible_landmarks(self, *args, **kwargs):
+        if self.vehicle.LOCK.locked():
+            return
         self.vehicle.LOCK.acquire()
         try:
             landmarks = np.array(self.scene.landmarks)
@@ -410,7 +418,17 @@ class gtk_slam_sim:
             visible_landmarks_idx = self.vehicle.sensor_fov.is_visible(relative_landmarks)
             self.vehicle.visible_landmarks.abs = landmarks[visible_landmarks_idx]
             self.vehicle.visible_landmarks.rel = relative_landmarks[visible_landmarks_idx]
+            """
+            if self.vehicle.visible_landmarks.rel.shape[0]:
+                inverse_landmarks = featuredetector.tf.absolute(self.vehicle.north_east_depth, 
+                                                                self.vehicle.roll_pitch_yaw, 
+                                                                self.vehicle.visible_landmarks.rel)
             
+                if not (np.abs(inverse_landmarks - self.vehicle.visible_landmarks.abs) < 1e-4).all():
+                    print "Inverse not equal"
+                    print "Diff = ", (inverse_landmarks - self.vehicle.visible_landmarks.abs)
+                    #code.interact(local=locals())
+            """
             # Set vertices
             vertices = self.vehicle.sensor_fov.fov_vertices_2d()
             
@@ -487,6 +505,8 @@ class gtk_slam_sim:
         self.ros.pcl_publisher.publish(pcl_msg)
         print "Visible Landmarks (abs):"
         print self.vehicle.visible_landmarks.abs
+        print "Publishing:"
+        print self.vehicle.visible_landmarks.rel
     
     def set_damage(self):
         self.viewer.LOCK.acquire()
