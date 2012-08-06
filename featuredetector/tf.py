@@ -34,6 +34,9 @@ def relative(vehicle_NED, vehicle_RPY, features_NED):
     #np.dot(rotation_matrix, relative_position.T).T
     return relative_position
 
+def relative_rot_mat(RPY):
+    return np.array([rotation_matrix(-RPY)])
+
 def absolute(vehicle_NED, vehicle_RPY, features_NED):
     if not features_NED.shape[0]: return np.empty(0)
     #r, p, y = 0, 1, 2
@@ -46,3 +49,6 @@ def absolute(vehicle_NED, vehicle_RPY, features_NED):
     rot_matrix = np.array([rotation_matrix(vehicle_RPY)])
     absolute_position = blas.dgemv(rot_matrix, features_NED) + vehicle_NED
     return absolute_position
+    
+def absolute_rot_mat(RPY):
+    return np.array([rotation_matrix(RPY)])

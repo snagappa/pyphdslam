@@ -6,6 +6,7 @@ Created on Tue Jul 17 12:22:51 2012
 """
 import numpy as np
 import code
+import tf
 
 class camera_fov(object):
     def __init__(self,  fov_x_deg=60, fov_y_deg=45, fov_far_m=3):
@@ -56,4 +57,17 @@ class camera_fov(object):
     def z_prob(self, far):
         z_idx = abs(self.tmp._test_dists_[:, np.newaxis] - far).argmin(axis=0)
         return self.tmp._proportional_area_[z_idx].copy()
+        
+    def pdf_detection(self, ref_ned, ref_rpy, features_abs):
+        # Transform points to local frame
+        rel_landmarks = tf.relative(ref_ned, ref_rpy, features_abs)
+        # Take the distance rather than the square?
+        dist_from_ref = np.sum(rel_landmarks[:,[0, 1]]**2, axis=1)
+        return np.exp(-dist_from_ref)*0.9
+        
+    def pdf_clutter(self, z_rel):
+        self.z_prob(z_rel[:,0])
+        
+    def rel_to_abs(self, ref_ned, ref_rpy, features_rel):
+        return tf.absolute(ref_ned, ref_rpy, features_rel)
         
