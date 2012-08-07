@@ -14,25 +14,28 @@ import copy
 
 DEBUG = True
 
-class STRUCT(object): pass
+class STRUCT(object):
+    pass
+
 SAMPLE = namedtuple("SAMPLE", "weight state covariance")
 
 class GMPHD(object):
-    def __init__(self, *args, **kwargs):
+    def __init__(self):
         self.weights = np.zeros(0)
         self.states = np.zeros(0)
         self.covs = np.zeros(0)
         self.parent_ned = np.zeros(3)
         self.parent_rpy = np.zeros(3)
         
-        self._estimate_ = STRUCT()
-        self._estimate_ = SAMPLE(np.zeros(0), np.zeros(0,3), np.zeros((0,3,3)))
+        self._estimate_ = SAMPLE(np.zeros(0), 
+                                 np.zeros(0, 3), np.zeros((0, 3, 3)))
         
         self.vars = STRUCT()
         self.vars.prune_threshold = 1e-4
         self.vars.merge_threshold = 2
         self.vars.birth_intensity = 0.01
         self.vars.clutter_intensity = 2
+        self.vars.resample_threshold = 0
         
         self.flags = STRUCT()
         self.flags.ESTIMATE_IS_VALID = True
@@ -269,7 +272,7 @@ class GMPHD(object):
                                                  parent_rpy, features_abs)
     
     def camera_clutter(self, observations):
-        return self.sensors.camera.z_prob(observations[:,0])
+        return self.sensors.camera.z_prob(observations[:, 0])
         
     
 ###############################################################################
@@ -295,25 +298,28 @@ class PHDSLAM(object):
         self.vars.dvl_b_R = None
         
         self.vehicle = STRUCT()
-        self.vehicle.weights = 1.0/self.vars.nparticles * np.ones(self.vars.nparticles)
+        self.vehicle.weights = 1.0/self.vars.nparticles * \
+            np.ones(self.vars.nparticles)
         self.vehicle.states = np.zeros(0, 6)
         self.vehicle.covs = np.zeros((0, 6, 6))
-        self.vehicle.maps = [self.map_instance() for i in range(self.vars.nparticles)]
+        self.vehicle.maps = [self.map_instance() 
+            for i in range(self.vars.nparticles)]
         
         self.last_time = STRUCT()
         self.last_time.predict = 0
-        self.last_time.gps = 0
-        self.last_time.dvl = 0
-        self.last_time.svs = 0
+        #self.last_time.gps = 0
+        #self.last_time.dvl = 0
+        #self.last_time.svs = 0
+        #self.last_time.map = 0
         
         self._estimate_ = STRUCT()
         self._estimate_.vehicle = STRUCT()
-        self._estimate_.vehicle.ned = SAMPLE(1, np.zeros(3), np.zeros((3,3)))
+        self._estimate_.vehicle.ned = SAMPLE(1, np.zeros(3), np.zeros((3, 3)))
         self._estimate_.vehicle.vel_xyz = SAMPLE(1, np.zeros(3), 
-                                                 np.zeros((3,3)))
-        self._estimate_.vehicle.rpy = SAMPLE(1, np.zeros(3), np.zeros((3,3)))
+                                                 np.zeros((3, 3)))
+        self._estimate_.vehicle.rpy = SAMPLE(1, np.zeros(3), np.zeros((3, 3)))
         self._estimate_.map = SAMPLE(np.zeros(0), 
-                                     np.zeros(0,3), np.zeros((0,3,3)))
+                                     np.zeros(0, 3), np.zeros((0, 3, 3)))
     
     def set_parameters(self, Q, gpsH, gpsR, dvlH, dvl_b_R, dvl_w_R):
         self.vars.Q = Q
@@ -342,10 +348,12 @@ class PHDSLAM(object):
         process_noise = self.vars.Q
         
         rot_mat = delta_t * tf.rotation_matrix(ctrl_input)
-        trans_mat[0,0:3,3:] = rot_mat
+        trans_mat[0, 0:3, 3:] = rot_mat
         
         scale_matrix = np.vstack((rot_mat*delta_t/2, delta_t*np.eye(3)))
-        sc_process_noise = np.dot(scale_matrix, np.dot(process_noise, scale_matrix.T)).squeeze() #+ delta_t/10*np.eye(6)
+        sc_process_noise = np.dot(scale_matrix, 
+            np.dot(process_noise, scale_matrix.T)).squeeze() 
+            #+ delta_t/10*np.eye(6)
         return trans_mat, sc_process_noise
     
     def predict(self, ctrl_input, predict_to_time):
@@ -366,30 +374,31 @@ class PHDSLAM(object):
                                           sc_process_noise)
         
         # Copy the particle state to the PHD parent state
-        parent_ned = np.array(pred_states[:,0:3])
+        parent_ned = np.array(pred_states[:, 0:3])
         #Calculate the rotation matrix to store for the map update
         rot_mat = tf.rotation_matrix(ctrl_input)
         # Copy the predicted states to the "parent state" attribute and 
         # perform a prediction for the map
         for i in range(self.vars.nparticles):
-            #self.maps[i].parameters.obs_fn.H = self.trans_matrices(-ctrl_input, 1.0)[0]
             self.vehicle.maps.parent_ned = parent_ned[i]
             self.vehicle.maps.parent_rpy = ctrl_input
             self.vehicle.maps.vars.H = rot_mat
             # self.vehicle.maps.predict()  # Not needed
     
     def _kf_update_(self, weights, states, covs, h_mat, r_mat, z):
-        # covariance is the same for all states, so do the update for one matrix
+        # covariance is the same for all states, do the update for one matrix
         upd_weights = weights.copy()
-        upd_cov0, kalman_info = kf_update_cov(np.array([covs[0]]), h_mat, r_mat, False)
+        upd_cov0, kalman_info = kf_update_cov(np.array([covs[0]]), 
+                                              h_mat, r_mat, False)
         upd_covs = np.repeat(upd_cov0, covs.shape[0], axis=0)
         # Update the states
         pred_z = blas.dgemv(h_mat, states)
-        upd_states, residuals = kf_update_x(states, pred_z, z, kalman_info.kalman_gain)
+        upd_states, residuals = kf_update_x(states, pred_z, z, 
+                                            kalman_info.kalman_gain)
         # Evaluate the new weight
         x_pdf = np.exp(-0.5*np.power(
-                    blas.dgemv(kalman_info.inv_sqrt_S, residuals), 2).sum(axis=1))/ \
-                    np.sqrt(kalman_info.det_S*(2*np.pi)**z.shape[0])
+            blas.dgemv(kalman_info.inv_sqrt_S, residuals), 2).sum(axis=1))/ \
+            np.sqrt(kalman_info.det_S*(2*np.pi)**z.shape[0])
         upd_weights = weights * x_pdf
         upd_weights /= upd_weights.sum()
         return upd_weights, upd_states, upd_covs
@@ -403,7 +412,7 @@ class PHDSLAM(object):
                                  self.vehicle.covs, h_mat, r_mat, gps)
         self.vehicle.weights = upd_weights
         self.vehicle.states = upd_states
-        self.vehicle.covariances = upd_covs
+        self.vehicle.covs = upd_covs
     
     def update_dvl(self, dvl, mode):
         self.flags.ESTIMATE_IS_VALID = False
@@ -418,7 +427,7 @@ class PHDSLAM(object):
                                  self.vehicle.covs, h_mat, r_mat, dvl)
         self.vehicle.weights = upd_weights
         self.vehicle.states = upd_states
-        self.vehicle.covariances = upd_covs
+        self.vehicle.covs = upd_covs
     
     def update_svs(self, svs):
         self.flags.ESTIMATE_IS_VALID = False
@@ -427,13 +436,13 @@ class PHDSLAM(object):
     def update_features(self, features):
         self.flags.ESTIMATE_IS_VALID = False
         if features.shape[0]:
-            features = features[:,0:3].copy()
+            features = features[:, 0:3].copy()
             features_noise = np.array([np.diag(features[i, 3:6]) 
                 for i in range(features.shape[0])])
         else:
             features = np.empty(0)
         slam_info = [self.vehicle.maps[i].iterate(features, features_noise) 
-            for i in range(self.weights.shape[0])]
+            for i in range(self.vars.nparticles)]
         slam_weight_update = np.array([slam_info[i].likelihood])
         self.vehicle.weights *= slam_weight_update/slam_weight_update.sum()
     
@@ -441,7 +450,7 @@ class PHDSLAM(object):
         if not self.flags.ESTIMATE_IS_VALID:
             state, cov = misctools.sample_mn_cv(self.vehicle.states, 
                                                 self.vehicle.weights)
-            self._estimate_.vehicle.ned = SAMPLE(1, state[0:3], cov[0:3,0:3])
+            self._estimate_.vehicle.ned = SAMPLE(1, state[0: 3], cov[0:3, 0:3])
             max_weight_idx = np.argmax(self.vehicle.weights)
             self._estimate_.map = self.vehicle.maps[max_weight_idx].estimate()
             self.flags.ESTIMATE_IS_VALID = True
@@ -449,7 +458,7 @@ class PHDSLAM(object):
     
     def resample(self):
         # Effective number of particles
-        nparticles = self.var.nparticles
+        nparticles = self.vars.nparticles
         eff_nparticles = 1/np.power(self.vehicle.weights, 2).sum()
         resample_threshold = eff_nparticles/nparticles
         # Check if we have particle depletion
