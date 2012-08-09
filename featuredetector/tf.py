@@ -22,16 +22,10 @@ def rotation_matrix(RPY):
 def relative(vehicle_NED, vehicle_RPY, features_NED):
     if not features_NED.shape[0]: return np.empty(0)
     relative_position = features_NED - vehicle_NED
-    #r, p, y = 0, 1, 2
-    #c = np.cos(-vehicle_RPY)
-    #s = np.sin(-vehicle_RPY)
-    #rotation_matrix = np.array([
-    #            [[c[p]*c[y], -c[r]*s[y]+s[r]*s[p]*c[y], s[r]*s[y]+c[r]*s[p]*c[y] ],
-    #             [c[p]*s[y], c[r]*c[y]+s[r]*s[p]*s[y], -s[r]*c[y]+c[r]*s[p]*s[y] ],
-    #             [-s[p], s[r]*c[p], c[r]*c[p] ]]])
     rot_matrix = np.array([rotation_matrix(-vehicle_RPY)])
     relative_position = blas.dgemv(rot_matrix, relative_position)
-    #np.dot(rotation_matrix, relative_position.T).T
+    #rot_matrix = rotation_matrix(-vehicle_RPY)
+    #relative_position = np.dot(rot_matrix, relative_position.T).T
     return relative_position
 
 def relative_rot_mat(RPY):
@@ -39,15 +33,12 @@ def relative_rot_mat(RPY):
 
 def absolute(vehicle_NED, vehicle_RPY, features_NED):
     if not features_NED.shape[0]: return np.empty(0)
-    #r, p, y = 0, 1, 2
-    #c = np.cos(vehicle_RPY)
-    #s = np.sin(vehicle_RPY)
-    #rotation_matrix = np.array([
-    #            [[c[p]*c[y], -c[r]*s[y]+s[r]*s[p]*c[y], s[r]*s[y]+c[r]*s[p]*c[y] ],
-    #             [c[p]*s[y], c[r]*c[y]+s[r]*s[p]*s[y], -s[r]*c[y]+c[r]*s[p]*s[y] ],
-    #             [-s[p], s[r]*c[p], c[r]*c[p] ]]])
     rot_matrix = np.array([rotation_matrix(vehicle_RPY)])
     absolute_position = blas.dgemv(rot_matrix, features_NED) + vehicle_NED
+    #rot_matrix = rotation_matrix(vehicle_RPY)
+    #absolute_position = (
+    #    np.array(np.dot(rot_matrix, features_NED.T).T, order='C') + 
+    #    vehicle_NED)
     return absolute_position
     
 def absolute_rot_mat(RPY):

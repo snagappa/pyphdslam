@@ -147,7 +147,7 @@ class gtk_slam_sim:
         
         self.timers = STRUCT()
         # Drawing timer
-        self.timers.update_image = self.viewer.figure.canvas.new_timer(interval=200)
+        self.timers.update_image = self.viewer.figure.canvas.new_timer(interval=50)
         self.timers.update_image.add_callback(self.draw)
         self.timers.update_image.start()
         # Update visible landmarks
@@ -553,15 +553,16 @@ class gtk_slam_sim:
             self.viewer.axis.scatter(points[:,1], points[:,0], s=36, marker='*', c='g')
         
     def draw(self, *args, **kwargs):
-        if not self.viewer.DRAW_CANVAS:
+        if not self.viewer.DRAW_CANVAS and self.viewer.DRAW_COUNT < 500:
             self.viewer.canvas.draw_idle()
+            self.viewer.DRAW_COUNT += 1
             return
         self.viewer.LOCK.acquire()
         if not self.viewer.DAMAGE and self.viewer.DRAW_COUNT < 10:
             self.viewer.DRAW_COUNT += 1
             self.viewer.LOCK.release()
             return
-        
+        self.viewer.DRAW_COUNT = 0
         self.viewer.figure.sca(self.viewer.axis)
         axis = self.viewer.axis
         axis.cla()
@@ -591,6 +592,7 @@ class gtk_slam_sim:
         
         axis.set_xlim(xlim)
         axis.set_ylim(ylim)
+        
         self.viewer.canvas.draw_idle()
         self.DAMAGE = False
         self.viewer.LOCK.release()

@@ -51,9 +51,9 @@ def kf_update_x(x, pred_z, z, kalman_gain, INPLACE=True):
     assert len(z.shape) == 1, "z must be a single observations, \
     not an array of observations"
     if INPLACE:
-        upd_state = x.copy()
-    else:
         upd_state = x
+    else:
+        upd_state = x.copy()
     
     #residuals = np.repeat([z], pred_z.shape[0], 0)
     #blas.daxpy(-1, pred_z, residuals)
@@ -64,11 +64,67 @@ def kf_update_x(x, pred_z, z, kalman_gain, INPLACE=True):
     return upd_state, residuals
     
 
+def np_kf_update_x(x, pred_z, z, kalman_gain, INPLACE=True):
+    assert len(z.shape) == 1, "z must be a single observations, \
+    not an array of observations"
+    if INPLACE:
+        upd_state = x
+    else:
+        upd_state = x.copy()
+    
+    #residuals = np.repeat([z], pred_z.shape[0], 0)
+    #blas.daxpy(-1, pred_z, residuals)
+    residuals = z - pred_z
+    # Update the state
+    upd_state += np.dot(kalman_gain, residuals.T).T
+    
+    return upd_state, residuals
+    
+
 def kf_predict_cov(covariance, F, Q):
     # Repeat Q n times and return as the predicted covariance
-    pred_cov = np.repeat(np.array([Q]), covariance.shape[0], 0)
-    blas.dgemm(F, blas.dgemm(covariance, F, TRANSPOSE_B=True), C=pred_cov)
+    #pred_cov = np.repeat(np.array([Q]), covariance.shape[0], 0)
+    #blas.dgemm(F, blas.dgemm(covariance, F, TRANSPOSE_B=True), C=pred_cov)
+    pred_cov = blas.dgemm(F, blas.dgemm(covariance, F, TRANSPOSE_B=True)) + Q
     return pred_cov
+    
+def np_kf_update_cov(covariance, H, R, INPLACE=True):
+    kalman_info = lambda:0
+    
+    if INPLACE:
+        upd_covariance = covariance
+        covariance_copy = covariance.copy()
+    else:
+        upd_covariance = covariance.copy()
+        covariance_copy = covariance
+    
+    # Comput PH^T
+    p_ht = np.dot(covariance, H.T)
+    # Compute HPH^T + R
+    hp_ht_pR = np.dot(H, p_ht) + R
+    
+    # Compute the Cholesky decomposition
+    chol_S = np.linalg.cholesky(hp_ht_pR)
+    # Compute the determinant
+    det_S = (np.diag(chol_S).prod())**2
+    # Compute the inverse of the square root
+    inv_sqrt_S = np.array(np.linalg.inv(chol_S), order='C')
+    # and the inverse
+    inv_S = np.dot(inv_sqrt_S.T, inv_sqrt_S)
+    
+    # Kalman gain
+    kalman_gain = np.dot(p_ht, inv_S)
+    
+    # Update the covariance
+    k_h = np.dot(kalman_gain, H)
+    upd_covariance -= np.dot(k_h, covariance_copy)
+    
+    kalman_info.inv_sqrt_S = inv_sqrt_S
+    kalman_info.det_S = det_S
+    kalman_info.kalman_gain = kalman_gain
+    
+    return upd_covariance, kalman_info
+    
     
 def kf_update_cov(covariance, H, R, INPLACE=True):
     kalman_info = lambda:0
@@ -81,11 +137,12 @@ def kf_update_cov(covariance, H, R, INPLACE=True):
         covariance_copy = covariance
     
     # Store R
-    chol_S = np.repeat(R, covariance.shape[0], 0)
+    #chol_S = np.repeat(R, covariance.shape[0], 0)
     # Compute PH^T
     p_ht = blas.dgemm(covariance, H, TRANSPOSE_B=True)
     # Compute HPH^T + R
-    blas.dgemm(H, p_ht, C=chol_S)
+    #blas.dgemm(H, p_ht, C=chol_S)
+    chol_S = blas.dgemm(H, p_ht) + R
     # Compute the Cholesky decomposition
     blas.dpotrf(chol_S, True)
     # Select the lower triangle (set the upper triangle to zero)

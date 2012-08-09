@@ -59,11 +59,15 @@ class camera_fov(object):
         return self.tmp._proportional_area_[z_idx].copy()
         
     def pdf_detection(self, ref_ned, ref_rpy, features_abs):
+        if not features_abs.shape[0]:
+            return np.empty(0)
         # Transform points to local frame
         rel_landmarks = tf.relative(ref_ned, ref_rpy, features_abs)
+        visible_features_idx = np.array(self.is_visible(rel_landmarks), 
+                                        dtype=np.float)
         # Take the distance rather than the square?
         dist_from_ref = np.sum(rel_landmarks[:,[0, 1]]**2, axis=1)
-        return np.exp(-dist_from_ref)*0.9
+        return np.exp(-dist_from_ref*0.005)*0.98*visible_features_idx
         
     def pdf_clutter(self, z_rel):
         self.z_prob(z_rel[:,0])

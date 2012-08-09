@@ -568,7 +568,9 @@ class G500_SLAM():
         #else :
         #    self.ros.last_update_time = rospy.Time.now()
         #    self.config.init = True
-        
+        print "Weights, States:"
+        print self.slam_worker.weights
+        print self.slam_worker.states
         
     def debug_print(self, *args, **kwargs):
         print "Weights: "

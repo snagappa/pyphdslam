@@ -194,7 +194,7 @@ class G500_PHDSLAM(phdslam.PHDSLAM):
         # Force the state space to 6: x, y, z, vx, vy, vz
         # roll, pitch yaw + velocities must be fed from parent
         state_parameters["ndims"] = 6
-        state_parameters["nparticles"] = 1#2*state_parameters["ndims"] + 1
+        state_parameters["nparticles"] = 2*state_parameters["ndims"] + 1
         
         super(G500_PHDSLAM, self).__init__(
                             state_markov_predict_fn, state_obs_fn,

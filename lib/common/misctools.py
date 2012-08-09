@@ -28,6 +28,12 @@ from scipy import weave
 from operator import mul, add
 import code
 
+def gen_retain_idx(array_len, del_idx):
+    if del_idx is None or len(del_idx) == 0:
+        return range(array_len)
+    retain_idx = [i for i in range(array_len) if i not in del_idx]
+    return retain_idx
+
 def mahalanobis(x, P, y):
     """
     Compute the Mahalanobis distance given x, P and y as 
@@ -35,7 +41,8 @@ def mahalanobis(x, P, y):
     """
     residual = x-y
     p_times_residual, _ = blas.dposv(P, residual, OVERWRITE_A=False)
-    return np.power(blas.ddot(residual, p_times_residual), 0.5)
+    #blas_result = np.power(blas.ddot(residual, p_times_residual), 0.5)
+    return (residual*p_times_residual).sum(1)**0.5
     
     
 def merge_states(wt, x, P):

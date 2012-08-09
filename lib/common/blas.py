@@ -37,7 +37,7 @@ def myarray(*args, **kw):
         return np.array(*args, **kw) 
 
 
-DEBUG = True
+DEBUG = False
 NUM_ELEM_MISMATCH = "  *Did not recieve correct number of elements*  "
 V_V_DIM_MISMATCH = "  *Vectors have incompatible dimensions*  "
 M_V_DIM_MISMATCH = "  *Matrix and vector have incompatible dimensions*  "
@@ -62,7 +62,13 @@ def blas_weaver(subroutine_string):
     compile_args += getattr(subroutine, "extra_compile_args", [])
     
     fn_string = "__c_code__."+subroutine_string
-    exec_string = "weave.inline(" + fn_string + ".code, " + fn_string+".python_vars" + ", libraries=" + fn_string + ".libraries" + ", support_code=" + fn_string + ".support_code" + ", extra_compile_args=" + str(compile_args) + ")"
+    exec_string = ("weave.inline(" + 
+        fn_string+".code, " + 
+        fn_string+".python_vars" + 
+        ", libraries=" + fn_string+".libraries" + 
+        ", support_code=" + fn_string+".support_code" + 
+        ", extra_compile_args=" + str(compile_args) + 
+        ", verbose=1" + ")" )
     return exec_string
 
 blas_exec_cmd = dict()                 
@@ -330,7 +336,7 @@ def daxpy(alpha, x, y=None):
         assert (x.shape[0]==y.shape[0]) or (x.shape[0]==1), NUM_ELEM_MISMATCH
         assert (x.shape[1]==y.shape[1]), V_V_DIM_MISMATCH
     
-    if np.isscalar(alpha):
+    if not isinstance(alpha, np.ndarray):
         alpha = np.array([alpha], dtype=float)
     
     if DEBUG:
@@ -347,7 +353,7 @@ def dscal(alpha, x):
     if DEBUG:
         assert_valid_vector(x)
     
-    if np.isscalar(alpha):
+    if not isinstance(alpha, np.ndarray):
         alpha = np.array([alpha], dtype=float)
     
     if DEBUG:
@@ -380,7 +386,8 @@ def _dcopy_(x, y, vec_len=None, x_offset=0, y_offset=0):
 ##
 
 #def dgemv(A, x, alpha=1.0, y=None, beta=1.0, TRANSPOSE_A=False):
-def dgemv(A, x, TRANSPOSE_A=False, alpha=1.0, beta=1.0, y=None):
+def dgemv(A, x, TRANSPOSE_A=False, alpha=np.array([1.0]), 
+          beta=np.array([1.0]), y=None):
     """
     Performs in-place matrix vector multiplication
     dgemv --
@@ -401,9 +408,9 @@ def dgemv(A, x, TRANSPOSE_A=False, alpha=1.0, beta=1.0, y=None):
     if DEBUG:
         assert_valid_vector(y, "y")
     
-    if np.isscalar(alpha):
+    if not isinstance(alpha, np.ndarray):
         alpha = np.array([alpha], dtype=float)
-    if np.isscalar(beta):
+    if not isinstance(beta, np.ndarray):
         beta = np.array([beta], dtype=float)
     if DEBUG:
         assert len(alpha) in [1, x.shape[0], A.shape[0]], NUM_ELEM_MISMATCH
@@ -455,7 +462,7 @@ def dtrsv(UPLO, A, x, TRANSPOSE_A=False):
     exec blas_exec_cmd["dtrsv"]
     
 
-def dsymv(UPLO, A, x, alpha=1.0, beta=1.0, y=None):
+def dsymv(UPLO, A, x, alpha=np.array([1.0]), beta=np.array([1.0]), y=None):
     """
     Performs in-place matrix vector multiplication for the symmetric matrix A.
     dsymv -- y = alpha*A*x + beta*y, A is symmetric
@@ -472,9 +479,9 @@ def dsymv(UPLO, A, x, alpha=1.0, beta=1.0, y=None):
         assert_valid_vector(y, "y")
         assert y.shape[1] == x.shape[1], V_V_DIM_MISMATCH
     
-    if np.isscalar(alpha):
+    if not isinstance(alpha, np.ndarray):
         alpha = np.array([alpha], dtype=float)
-    if np.isscalar(beta):
+    if not isinstance(beta, np.ndarray):
         beta = np.array([beta], dtype=float)
     if DEBUG:
         assert len(alpha) in [1, x.shape[0], A.shape[0]], NUM_ELEM_MISMATCH
@@ -486,7 +493,7 @@ def dsymv(UPLO, A, x, alpha=1.0, beta=1.0, y=None):
     return fn_return_val
     
     
-def dger(x, y, alpha=1.0, A=None):
+def dger(x, y, alpha=np.array([1.0]), A=None):
     """
     Perform the general rank 1 operation in-place.
     dger -- rank 1 operation, A = alpha*x*y**T + A
@@ -505,7 +512,7 @@ def dger(x, y, alpha=1.0, A=None):
         assert_valid_matrix(A, "A")
         assert A.shape == (max([x.shape[0], y.shape[0]]), x.shape[1], y.shape[1]), NUM_ELEM_MISMATCH+M_V_DIM_MISMATCH
     
-    if np.isscalar(alpha):
+    if not isinstance(alpha, np.ndarray):
         alpha = np.array([alpha], dtype=float)
     if DEBUG:
         #assert_valid_vector(alpha, "alpha")
@@ -516,7 +523,7 @@ def dger(x, y, alpha=1.0, A=None):
     return fn_return_val
     
     
-def dsyr(UPLO, x, alpha=1.0, A=None):
+def dsyr(UPLO, x, alpha=np.array([1.0]), A=None):
     """
     Perform the symmetric rank 1 operation in-place.
     dsyr -- symmetric rank 1 operation
@@ -530,7 +537,7 @@ def dsyr(UPLO, x, alpha=1.0, A=None):
     if A==None:
         A = np.zeros(x.shape + (x.shape[1],), dtype=float)
         fn_return_val = A
-    if np.isscalar(alpha):
+    if not isinstance(alpha, np.ndarray):
         alpha = np.array([alpha], dtype=float)
     if DEBUG:
         assert_valid_matrix(A)
@@ -547,7 +554,8 @@ def dsyr(UPLO, x, alpha=1.0, A=None):
 ##
 
 #def dgemm(A, B, alpha=1.0, C=None, beta=1.0, TRANSPOSE_A=False, TRANSPOSE_B=False):
-def dgemm(A, B, TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, beta=1.0, C=None):
+def dgemm(A, B, TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=np.array([1.0]), 
+          beta=np.array([1.0]), C=None):
     """
     Performs general matrix matrix multiplication in-place
     dgemm -- matrix-matrix operation, 
@@ -561,21 +569,21 @@ def dgemm(A, B, TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, beta=1.0, C=Non
         assert A.shape[0] == B.shape[0] or A.shape[0]==1 or B.shape[0] == 1, NUM_ELEM_MISMATCH
         #assert A.shape[0] in [1, B.shape[0]] and B.shape[0] in [1, A.shape[0]], NUM_ELEM_MISMATCH
     
-    A_dims = list(A.shape[1:])
-    B_dims = list(B.shape[1:])
+    A_dims = A.shape[1:]
+    B_dims = B.shape[1:]
     if TRANSPOSE_A:
-        A_dims.reverse()
+        A_dims = (A_dims[1], A_dims[0])
     if TRANSPOSE_B:
-        B_dims.reverse()
+        B_dims = (B_dims[1], B_dims[0])
             
     fn_return_val = None
     if C==None:
         C = np.zeros((max([A.shape[0], B.shape[0]]), A_dims[0], B_dims[1]), dtype=float)
         fn_return_val = C
     
-    if np.isscalar(alpha):
+    if not isinstance(alpha, np.ndarray):
         alpha = np.array([alpha], dtype=float)
-    if np.isscalar(beta):
+    if not isinstance(beta, np.ndarray):
         beta = np.array([beta], dtype=float)
         
     if DEBUG:
@@ -596,7 +604,8 @@ def dgemm(A, B, TRANSPOSE_A=False, TRANSPOSE_B=False, alpha=1.0, beta=1.0, C=Non
     return fn_return_val
 
 
-def dsymm(A, B, UPLO, SIDE='l', alpha=1.0, beta=1.0, C=None):
+def dsymm(A, B, UPLO, SIDE='l', alpha=np.array([1.0]), 
+          beta=np.array([1.0]), C=None):
     """
     Performs in-place matrix matrix multiplication for symmetric matrix A.
     dsymm -- matrix-matrix operation, A is symmetric, B and C are mxn
@@ -605,7 +614,7 @@ def dsymm(A, B, UPLO, SIDE='l', alpha=1.0, beta=1.0, C=None):
     UPLO = 'l' or 'u'
     if C is not specified, a new matrix is returned.
     """
-    if np.isscalar(alpha):
+    if not isinstance(alpha, np.ndarray):
         alpha = np.array([alpha], dtype=float)
     if DEBUG:
         assert SIDE in ['l', 'L', 'r', 'R'], "SIDE must be one of ['l', 'L', 'r', 'R']"
@@ -615,10 +624,10 @@ def dsymm(A, B, UPLO, SIDE='l', alpha=1.0, beta=1.0, C=None):
         assert A.shape[0] in [1, B.shape[0]] and B.shape[0] in [1, A.shape[0]], NUM_ELEM_MISMATCH
         assert len(alpha) in [1, A.shape[0], B.shape[0]], NUM_ELEM_MISMATCH
             
-    A_dims = list(A.shape[1:])
-    B_dims = list(B.shape[1:])
+    A_dims = A.shape[1:]
+    B_dims = B.shape[1:]
     
-    if np.isscalar(beta):
+    if not isinstance(beta, np.ndarray):
         beta = np.array([beta], dtype=float)
     fn_return_val = None
     if C==None:
@@ -640,7 +649,8 @@ def dsymm(A, B, UPLO, SIDE='l', alpha=1.0, beta=1.0, C=None):
     return fn_return_val
 
 
-def dsyrk(UPLO, A, TRANSPOSE_A=False, alpha=1.0, beta=1.0, C=None):
+def dsyrk(UPLO, A, TRANSPOSE_A=False, alpha=np.array([1.0]), 
+          beta=np.array([1.0]), C=None):
     """
     Perform in-place symmetric rank k operation.
     dsyrk -- symmetric rank k operation, C is symmetric
@@ -648,10 +658,10 @@ def dsyrk(UPLO, A, TRANSPOSE_A=False, alpha=1.0, beta=1.0, C=None):
     C := alpha*A**T*A + beta*C  if TRANSPOSE_A=True
     If C is not specified, a new matrix is returned.
     """
-    A_dims = list(A.shape[1:])
+    A_dims = A.shape[1:]
     if TRANSPOSE_A:
-        A_dims.reverse()
-    if np.isscalar(alpha):
+        A_dims = (A_dims[1], A_dims[0])
+    if not isinstance(alpha, np.ndarray):
         alpha = np.array([alpha], dtype=float)
     
     if DEBUG:
@@ -663,7 +673,7 @@ def dsyrk(UPLO, A, TRANSPOSE_A=False, alpha=1.0, beta=1.0, C=None):
     if C==None:
         C = np.zeros((A.shape[0], A_dims[0], A_dims[1]), dtype=float)
         fn_return_val = C
-    if np.isscalar(beta):
+    if not isinstance(beta, np.ndarray):
         beta = np.array([beta], dtype=float)
         
     if DEBUG:
@@ -969,17 +979,23 @@ def mktril(A):
     """
     Given a matrix A, zero the strictly upper triangular portion of the matrix.
     """
-    if DEBUG:
-        assert_valid_matrix(A, "A")
-    exec blas_exec_cmd["mktril"]
+    #if DEBUG:
+    #    assert_valid_matrix(A, "A")
+    #exec blas_exec_cmd["mktril"]
+    A_dims = A.shape[-2:]
+    mask = np.tril(np.ones(A_dims))
+    A *= mask
     
 def mktriu(A):
     """
     Given a matrix A, zero the strictly upper triangular portion of the matrix.
     """
-    if DEBUG:
-        assert_valid_matrix(A, "A")
-    exec blas_exec_cmd["mktriu"]
+    #if DEBUG:
+    #    assert_valid_matrix(A, "A")
+    #exec blas_exec_cmd["mktriu"]
+    A_dims = A.shape[-2:]
+    mask = np.triu(np.ones(A_dims))
+    A *= mask
 
 
 def test_ddot(num_elements=1000, num_dims=4):
