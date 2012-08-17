@@ -48,9 +48,9 @@ class GMPHD(object):
                                  np.zeros((0, 3)), np.zeros((0, 3, 3)))
         
         self.vars = STRUCT()
-        self.vars.prune_threshold = 1e-4
-        self.vars.merge_threshold = 1
-        self.vars.birth_intensity = 0.1
+        self.vars.prune_threshold = 1e-2
+        self.vars.merge_threshold = 0.1
+        self.vars.birth_intensity = 0.05
         self.vars.clutter_intensity = 1
         
         self.flags = STRUCT()
@@ -58,6 +58,12 @@ class GMPHD(object):
         
         self.sensors = STRUCT()
         self.sensors.camera = featuredetector.sensors.camera_fov()
+        # Create a dummy camera with slightly larger fov
+        dummy_camera = featuredetector.sensors.camera_fov()
+        dummy_camera.set_x_y_far(dummy_camera.fov_x_deg+2, 
+                                 dummy_camera.fov_y_deg+2, 
+                                 dummy_camera.fov_far_m+0.2)
+        self.sensors.dummy_camera = dummy_camera
     
     def copy(self):
         new_object = GMPHD()
@@ -223,10 +229,67 @@ class GMPHD(object):
         self.covs = self.covs[valid_idx]
         assert self.weights.shape[0] == self.states.shape[0] == self.covs.shape[0], "Lost states!!"
     
+    def merge_fov(self):
+        if (self.vars.merge_threshold < 0) or (self.weights.shape[0] < 2):
+            return
+        sensor = self.sensors.dummy_camera
+        detected_idx = sensor.pdf_detection(self.parent_ned, self.parent_rpy,
+                                            self.states)
+        detected_idx = np.where(detected_idx > 0.5)[0]
+        undetected_idx = misctools.gen_retain_idx(self.weights.shape[0], 
+                                                  detected_idx)
+        if not detected_idx.shape[0]:
+            return
+        merged_wts = []
+        merged_sts = []
+        merged_cvs = []
+        
+        # Save samples which are not going to be merged
+        unmerged_wts = self.weights[undetected_idx]
+        unmerged_sts = self.states[undetected_idx]
+        unmerged_cvs = self.covs[undetected_idx]
+        # Remove unmerged samples from the state
+        self.weights = self.weights[detected_idx]
+        self.states = self.states[detected_idx]
+        self.covs = self.covs[detected_idx]
+        num_remaining_components = self.weights.shape[0]
+        
+        while num_remaining_components:
+            max_wt_index = self.weights.argmax()
+            max_wt_state = np.array([self.states[max_wt_index]])
+            max_wt_cov = np.array([self.covs[max_wt_index]])
+            mahalanobis_dist = misctools.mahalanobis(max_wt_state, 
+                                                     max_wt_cov, 
+                                                     self.states)
+            merge_list_indices = ( np.where(mahalanobis_dist <= 
+                                                self.vars.merge_threshold)[0] )
+            new_wt, new_st, new_cv = misctools.merge_states(
+                                            self.weights[merge_list_indices], 
+                                            self.states[merge_list_indices],
+                                            self.covs[merge_list_indices])
+            merged_wts += [new_wt]
+            merged_sts += [new_st]
+            merged_cvs += [new_cv]
+            # Remove merged states from the list
+            #self.weights = np.delete(self.weights, merge_list_indices)
+            #self.states = np.delete(self.states, merge_list_indices, 0)
+            #self.covs = np.delete(self.covs, merge_list_indices, 0)
+            retain_idx = misctools.gen_retain_idx(self.weights.shape[0], 
+                                                  merge_list_indices)
+            self.weights = self.weights[retain_idx]
+            self.states = self.states[retain_idx]
+            self.covs = self.covs[retain_idx]
+            num_remaining_components = self.weights.shape[0]
+        
+        self.flags.ESTIMATE_IS_VALID = False
+        self.set_states(np.hstack((unmerged_wts, np.array(merged_wts))), 
+                        np.vstack((unmerged_sts, np.array(merged_sts))), 
+                        np.vstack((unmerged_cvs, np.array(merged_cvs))))
+        assert self.weights.shape[0] == self.states.shape[0] == self.covs.shape[0], "Lost states!!"
+        
     def merge(self):
         if (self.vars.merge_threshold < 0) or (self.weights.shape[0] < 2):
             return
-        self.flags.ESTIMATE_IS_VALID = False
         merged_wts = []
         merged_sts = []
         merged_cvs = []
@@ -258,6 +321,7 @@ class GMPHD(object):
             self.covs = self.covs[retain_idx]
             num_remaining_components = self.weights.shape[0]
         
+        self.flags.ESTIMATE_IS_VALID = False
         self.set_states(np.array(merged_wts), 
                         np.array(merged_sts), np.array(merged_cvs))
         assert self.weights.shape[0] == self.states.shape[0] == self.covs.shape[0], "Lost states!!"
@@ -280,8 +344,9 @@ class GMPHD(object):
         slam_info = self.update(observations, obs_noise)
         self.estimate()
         self.prune()
-        self.birth(observations, obs_noise, APPEND=True)
-        self.merge()
+        if observations.shape[0]:
+            self.birth(observations, obs_noise, APPEND=True)
+        self.merge_fov()
         return slam_info
     
     def intensity(self):

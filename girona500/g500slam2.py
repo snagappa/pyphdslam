@@ -601,7 +601,8 @@ class G500_SLAM():
         self.ros.map.publisher.publish(pcl_msg)
         #print "Landmarks at: "
         #print map_states
-        print "Tracking ", map_estimate.weight.shape[0], " targets."
+        print "Tracking ", map_estimate.weight.shape[0], \
+            " (", map_estimate.weight.sum(), ") targets."
         #print "Intensity = ", map_estimate.weight.sum()
         dropped_msg_time = \
             (rospy.Time.now()-self.config.last_time.init).to_sec()

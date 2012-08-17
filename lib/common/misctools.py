@@ -40,7 +40,11 @@ def mahalanobis(x, P, y):
     sqrt((x-y)'*inv(P)*(x-y)).
     """
     residual = x-y
-    p_times_residual, _ = blas.dposv(P, residual, OVERWRITE_A=False)
+    if P.shape[0] == 1:
+        p_times_residual = np.linalg.solve(P[0], residual.T).T
+    else:
+        p_times_residual, _ = blas.dposv(P, residual, OVERWRITE_A=False)
+    
     #blas_result = np.power(blas.ddot(residual, p_times_residual), 0.5)
     return (residual*p_times_residual).sum(1)**0.5
     
@@ -51,7 +55,8 @@ def merge_states(wt, x, P):
     covariances with their weights.
     """
     merged_wt = wt.sum()
-    merged_x = np.sum(blas.daxpy(wt, x), 0)/merged_wt
+    #merged_x = np.sum(blas.daxpy(wt, x), 0)/merged_wt
+    merged_x = (wt[:, np.newaxis]*x).sum(0)/merged_wt
     """
     residual = x.copy()
     blas.daxpy(-1.0, np.array([merged_x]), residual)
@@ -59,10 +64,12 @@ def merge_states(wt, x, P):
     residual = x - merged_x
     # Convert the residual to a column vector
     #residual.shape += (1,)
-    P_copy = P.copy()
-    blas.dsyr('l', residual, 1.0, P_copy)
+    #P_copy = P.copy()
+    #blas.dsyr('l', residual, 1.0, P_copy)
+    #merged_P = np.array([(wt[:,np.newaxis,np.newaxis]*P_copy).sum(axis=0)/merged_wt], order='C')
+    #blas.symmetrise(merged_P, 'l')
+    P_copy = P + blas.dger(residual, residual)
     merged_P = np.array([(wt[:,np.newaxis,np.newaxis]*P_copy).sum(axis=0)/merged_wt], order='C')
-    blas.symmetrise(merged_P, 'l')
     return merged_wt, merged_x, merged_P[0]
     
     
