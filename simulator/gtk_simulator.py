@@ -36,7 +36,7 @@ import roslib
 roslib.load_manifest("g500slam")
 from nav_msgs.msg import Odometry
 from auv_msgs.msg import NavSts
-from control_g500.srv import GotoSrv, GotoSrvRequest
+from cola2_control.srv import GotoSrv, GotoSrvRequest
 import rospy
 import tf
 from sensor_msgs.msg import PointCloud2
@@ -165,7 +165,7 @@ class gtk_slam_sim:
         self.ros.name = "slamsim"
         rospy.init_node(self.ros.name)
         # Create Subscriber
-        rospy.Subscriber("/uwsim/girona500_odom", Odometry, self.update_position)
+        rospy.Subscriber("/dataNavigator", Odometry, self.update_position)
         # Create Publisher
         self.ros.pcl_publisher = rospy.Publisher("/slamsim/features", PointCloud2)
         self.ros.pcl_helper = featuredetector.msgs.msgs(featuredetector.msgs.MSG_XYZ_COV)
@@ -310,7 +310,7 @@ class gtk_slam_sim:
             print "Could not execute path"
             return
         try:
-            goto_wp = rospy.ServiceProxy("/control_g500/goto", GotoSrv)
+            goto_wp = rospy.ServiceProxy("/cola2_control/goto", GotoSrv)
             waypoints = self.scene.waypoints
             waypoint_index = 0
             

@@ -119,6 +119,7 @@ def np_kf_update_cov(covariance, H, R, INPLACE=True):
     k_h = np.dot(kalman_gain, H)
     upd_covariance -= np.dot(k_h, covariance_copy)
     
+    kalman_info.S = hp_ht_pR
     kalman_info.inv_sqrt_S = inv_sqrt_S
     kalman_info.det_S = det_S
     kalman_info.kalman_gain = kalman_gain
@@ -142,9 +143,9 @@ def kf_update_cov(covariance, H, R, INPLACE=True):
     p_ht = blas.dgemm(covariance, H, TRANSPOSE_B=True)
     # Compute HPH^T + R
     #blas.dgemm(H, p_ht, C=chol_S)
-    chol_S = blas.dgemm(H, p_ht) + R
+    hp_ht_pR = blas.dgemm(H, p_ht) + R
     # Compute the Cholesky decomposition
-    blas.dpotrf(chol_S, True)
+    chol_S = blas.dpotrf(hp_ht_pR, False)
     # Select the lower triangle (set the upper triangle to zero)
     blas.mktril(chol_S)
     # Compute the determinant
@@ -166,6 +167,7 @@ def kf_update_cov(covariance, H, R, INPLACE=True):
     k_h = blas.dgemm(kalman_gain, H)
     blas.dgemm(k_h, covariance_copy, alpha=-1.0, C=upd_covariance)
     
+    kalman_info.S = hp_ht_pR
     kalman_info.inv_sqrt_S = inv_sqrt_S
     kalman_info.det_S = det_S
     kalman_info.kalman_gain = kalman_gain

@@ -37,7 +37,7 @@ def myarray(*args, **kw):
         return np.array(*args, **kw) 
 
 
-DEBUG = False
+DEBUG = True
 NUM_ELEM_MISMATCH = "  *Did not recieve correct number of elements*  "
 V_V_DIM_MISMATCH = "  *Vectors have incompatible dimensions*  "
 M_V_DIM_MISMATCH = "  *Matrix and vector have incompatible dimensions*  "

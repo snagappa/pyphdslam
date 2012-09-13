@@ -48,7 +48,15 @@ def mahalanobis(x, P, y):
     #blas_result = np.power(blas.ddot(residual, p_times_residual), 0.5)
     return (residual*p_times_residual).sum(1)**0.5
     
-    
+def approximate_mahalanobis(x, P, y):
+    # Compute the mahalanobis distance using the diagonal of the matrix P
+    assert P.shape[1] == P.shape[2], "P must be a square matrix"
+    select_diag_idx = xrange(P.shape[1])
+    residual = x-y
+    diag_P = P[:, select_diag_idx, select_diag_idx]
+    p_times_residual = (1.0/diag_P)*residual
+    return (residual*p_times_residual).sum(1)**0.5
+
 def merge_states(wt, x, P):
     """
     Compute the weighted mean and covariance from a (numpy) list of states and
@@ -62,15 +70,24 @@ def merge_states(wt, x, P):
     blas.daxpy(-1.0, np.array([merged_x]), residual)
     """
     residual = x - merged_x
+    # method 1:
     # Convert the residual to a column vector
     #residual.shape += (1,)
     #P_copy = P.copy()
     #blas.dsyr('l', residual, 1.0, P_copy)
     #merged_P = np.array([(wt[:,np.newaxis,np.newaxis]*P_copy).sum(axis=0)/merged_wt], order='C')
     #blas.symmetrise(merged_P, 'l')
-    P_copy = P + blas.dger(residual, residual)
-    merged_P = np.array([(wt[:,np.newaxis,np.newaxis]*P_copy).sum(axis=0)/merged_wt], order='C')
-    return merged_wt, merged_x, merged_P[0]
+    
+    # method 2:
+    #P_copy = P + blas.dger(residual, residual)
+    
+    # method 3:
+    P_copy = P + [residual[np.newaxis,i].T * residual[np.newaxis,i] 
+        for i in xrange(residual.shape[0])]
+    
+    #merged_P = np.array([(wt[:,np.newaxis,np.newaxis]*P_copy).sum(axis=0)/merged_wt], order='C')
+    merged_P = (wt[:,np.newaxis,np.newaxis]*P_copy).sum(axis=0)/merged_wt
+    return merged_wt, merged_x, merged_P
     
     
 def get_resample_index(weights, nparticles=-1):
@@ -108,12 +125,12 @@ def get_resample_index(weights, nparticles=-1):
     
 def mvnpdf(x, mu, sigma):
     # Compute the residuals
-    if x.shape[0] == 1:
-        residual = np.repeat(x, mu.shape[0], 0)
-    else:
-        residual = x.copy()
-    blas.daxpy(-1.0, mu, residual)
-    
+    #if x.shape[0] == 1:
+    #    residual = np.repeat(x, mu.shape[0], 0)
+    #else:
+    #    residual = x.copy(order='c')
+    #blas.daxpy(-1.0, mu, residual)
+    residual = x-mu
     #if x.shape[0] == 1:
     #    x = np.repeat(x, mu.shape[0], 0)
     #residual = x-mu
@@ -134,7 +151,7 @@ def mvnpdf(x, mu, sigma):
         inv_sqrt_sigma = blas.dtrtri(chol_sigma, 'l')
         exp_term = np.power(blas.dgemv(inv_sqrt_sigma,residual), 2).sum(axis=1)
     
-    pdf = np.exp(-0.5*exp_term)/np.sqrt(det_sigma*(2*np.pi)**x.shape[1])
+    pdf = np.exp(-0.5*exp_term)/np.sqrt(det_sigma*(2*np.pi)**residual.shape[1])
     return pdf
     
     

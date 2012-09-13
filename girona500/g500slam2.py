@@ -35,13 +35,13 @@ import threading
 import sys
 
 # Msgs imports
-from navigation_g500.msg import TeledyneExplorerDvl, ValeportSoundVelocity, \
+from cola2_navigation.msg import TeledyneExplorerDvl, ValeportSoundVelocity, \
     FastraxIt500Gps
 from sensor_msgs.msg import Imu
 from sensor_msgs.msg import PointCloud2
 from auv_msgs.msg import NavSts
 from std_srvs.srv import Empty, EmptyResponse
-from navigation_g500.srv import SetNE, SetNEResponse #, SetNERequest
+from cola2_navigation.srv import SetNE, SetNEResponse #, SetNERequest
 
 import pyximport; pyximport.install()
 import lib.slam_worker
@@ -111,7 +111,7 @@ class G500_SLAM():
         
         ndims = slam_worker.vars.ndims
         nparticles = slam_worker.vars.nparticles
-        if nparticles == 2*ndims+1:
+        if nparticles == 7:#2*ndims+1:
             sc_process_noise = \
                 slam_worker.trans_matrices(np.zeros(3), 1.0)[1] + \
                 slam_worker.trans_matrices(np.zeros(3), 0.01)[1]
@@ -119,6 +119,9 @@ class G500_SLAM():
                                      sc_process_noise[0:3,0:3].copy(), 
                                     _alpha=UKF_ALPHA, _beta=UKF_BETA, 
                                     _kappa=UKF_KAPPA)[0]
+            sigma_states = np.array(
+                np.hstack((sigma_states, np.zeros((nparticles,3)))),
+                order='C')
             slam_worker.set_states(states=sigma_states)
         return slam_worker
         
@@ -171,13 +174,13 @@ class G500_SLAM():
         if not __PROFILE__:
             print "Creating ROS subscriptions..."
             # Create Subscriber
-            rospy.Subscriber("/navigation_g500/teledyne_explorer_dvl", 
+            rospy.Subscriber("/cola2_navigation/teledyne_explorer_dvl", 
                 TeledyneExplorerDvl, self.update_dvl)
-            rospy.Subscriber("/navigation_g500/valeport_sound_velocity", 
+            rospy.Subscriber("/cola2_navigation/valeport_sound_velocity", 
                              ValeportSoundVelocity, self.update_svs)
-            rospy.Subscriber("/navigation_g500/imu", Imu, self.update_imu)
+            rospy.Subscriber("/cola2_navigation/imu", Imu, self.update_imu)
             if self.config.gps_update :
-                rospy.Subscriber("/navigation_g500/fastrax_it_500_gps", 
+                rospy.Subscriber("/cola2_navigation/fastrax_it_500_gps", 
                                  FastraxIt500Gps, self.update_gps)
             ## Subscribe to visiona slam-features node
             rospy.Subscriber("/slamsim/features", PointCloud2, 
