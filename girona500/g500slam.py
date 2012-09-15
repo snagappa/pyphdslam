@@ -34,13 +34,13 @@ import copy
 import threading
 
 # Msgs imports
-from navigation_g500.msg import TeledyneExplorerDvl, ValeportSoundVelocity, \
+from cola2_navigation.msg import TeledyneExplorerDvl, ValeportSoundVelocity, \
     FastraxIt500Gps
 from sensor_msgs.msg import Imu
 from sensor_msgs.msg import PointCloud2
 from auv_msgs.msg import NavSts
 from std_srvs.srv import Empty, EmptyResponse
-from navigation_g500.srv import SetNE, SetNEResponse #, SetNERequest
+from cola2_navigation.srv import SetNE, SetNEResponse #, SetNERequest
 
 import numpy as np
 import girona500

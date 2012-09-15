@@ -109,22 +109,28 @@ class G500_SLAM():
             dvl_b_R=np.eye(3)*self.config.dvl_bottom_covariance, 
             dvl_w_R=np.eye(3)*self.config.dvl_water_covariance)
         
-        ndims = slam_worker.vars.ndims
+        #ndims = slam_worker.vars.ndims
         nparticles = slam_worker.vars.nparticles
         if nparticles == 7:#2*ndims+1:
-            sc_process_noise = \
-                slam_worker.trans_matrices(np.zeros(3), 1.0)[1] + \
-                slam_worker.trans_matrices(np.zeros(3), 0.01)[1]
-            sigma_states = sigma_pts(np.zeros((1, 3)), 
-                                     sc_process_noise[0:3,0:3].copy(), 
-                                    _alpha=UKF_ALPHA, _beta=UKF_BETA, 
-                                    _kappa=UKF_KAPPA)[0]
-            sigma_states = np.array(
-                np.hstack((sigma_states, np.zeros((nparticles,3)))),
-                order='C')
+            sigma_states = self._make_sigma_states_(slam_worker, 
+                                                    np.zeros((1, 3)), nparticles)
             slam_worker.set_states(states=sigma_states)
         return slam_worker
         
+    def _make_sigma_states_(self, slam_worker, mean_state, nparticles):
+        sc_process_noise = \
+            slam_worker.trans_matrices(np.zeros(3), 1.0)[1] + \
+            slam_worker.trans_matrices(np.zeros(3), 0.01)[1]
+        sigma_states = sigma_pts(mean_state, 
+                                 sc_process_noise[0:3,0:3].copy(), 
+                                _alpha=UKF_ALPHA, _beta=UKF_BETA, 
+                                _kappa=UKF_KAPPA)[0]
+        sigma_states = np.array(
+            np.hstack((sigma_states, np.zeros((nparticles,3)))),
+            order='C')
+        return sigma_states
+            
+    
     def init_config(self):
         config = self.config
         
@@ -220,39 +226,29 @@ class G500_SLAM():
         print "Resetting navigation..."
         rospy.loginfo("%s: Reset Navigation", self.ros.name)
         #self.slam_worker.states[:,0:2] = 0
-        ndims = self.slam_worker.vars.ndims
+        #ndims = self.slam_worker.vars.ndims
         nparticles = self.slam_worker.vars.nparticles
-        if nparticles == 2*ndims + 1:
+        if nparticles == 7:#2*ndims + 1:
             #pose_angle = tf.transformations.euler_from_quaternion(
             #                                    self.vehicle.pose_orientation)
-            sc_process_noise = \
-                self.slam_worker.trans_matrices(np.zeros(3), 1.0)[1] + \
-                self.slam_worker.trans_matrices(np.zeros(3), 0.01)[1]
-            self.slam_worker.vehicle.states = sigma_pts(np.zeros((1, ndims)), 
-                                                        sc_process_noise, 
-                                                        _alpha=UKF_ALPHA, 
-                                                        _beta=UKF_BETA, 
-                                                        _kappa=UKF_KAPPA)[0]
+            sigma_states = self._make_sigma_states_(self.slam_worker, 
+                                                    np.zeros((1, 3)), nparticles)
+            self.slam_worker.set_states(states=sigma_states)
         else:
             self.slam_worker.vehicle.states[:, :] = 0
         return EmptyResponse()
         
     def set_navigation(self, req):
         print "Setting new navigation..."
-        ndims = self.slam_worker.vars.ndims
+        #ndims = self.slam_worker.vars.ndims
         nparticles = self.slam_worker.vars.nparticles
-        if nparticles == 2*ndims + 1:
+        if nparticles == 7:#2*ndims + 1:
             #pose_angle = tf.transformations.euler_from_quaternion(
             #                                    self.vehicle.pose_orientation)
-            sc_process_noise = \
-                self.slam_worker.trans_matrices(np.zeros(3), 1.0)[1] + \
-                self.slam_worker.trans_matrices(np.zeros(3), 0.01)[1]
-            mean_state = np.array([[req.north, req.east, 0, 0, 0, 0]])
-            self.slam_worker.vehicle.states = sigma_pts(mean_state, 
-                                                        sc_process_noise, 
-                                                        _alpha=UKF_ALPHA, 
-                                                        _beta=UKF_BETA, 
-                                                        _kappa=UKF_KAPPA)[0]
+            mean_state = np.array([[req.north, req.east, 0]])
+            sigma_states = self._make_sigma_states_(self.slam_worker, 
+                                                    mean_state, nparticles)
+            self.slam_worker.set_states(states=sigma_states)
         else:
             self.slam_worker.vehicle.states[:, 0] = req.north
             self.slam_worker.vehicle.states[:, 1] = req.east
@@ -604,13 +600,14 @@ class G500_SLAM():
         self.ros.map.publisher.publish(pcl_msg)
         #print "Landmarks at: "
         #print map_states
+        
         print "Tracking ", map_estimate.weight.shape[0], \
             " (", map_estimate.weight.sum(), ") targets."
         #print "Intensity = ", map_estimate.weight.sum()
         dropped_msg_time = \
             (rospy.Time.now()-self.config.last_time.init).to_sec()
         print "Dropped ", self.ros.NO_LOCK_ACQUIRE, " messages in ", \
-            dropped_msg_time, " seconds."
+            int(dropped_msg_time), " seconds."
         
     def debug_print(self, *args, **kwargs):
         print "Weights: "

@@ -41,7 +41,7 @@ import rospy
 import tf
 from sensor_msgs.msg import PointCloud2
 import featuredetector
-
+from lib.common import misctools
 import threading
 import numpy as np
 import copy
@@ -71,6 +71,7 @@ class gtk_slam_sim:
         self.vehicle.visible_landmarks = STRUCT()
         self.vehicle.visible_landmarks.abs = np.empty(0)
         self.vehicle.visible_landmarks.rel = np.empty(0)
+        self.vehicle.visible_landmarks.noise = np.empty(0)
         self.vehicle.visible_landmarks.fov_poly_vertices = np.empty(0)
         self.vehicle.LOCK = threading.Lock()
         
@@ -85,6 +86,7 @@ class gtk_slam_sim:
         self.scene = STRUCT()
         self.scene.landmarks = []
         self.scene.waypoints = []
+        self.scene.clutter = 2
         
         # variables to enable undo/redo
         self.scene.mode = LANDMARKS
@@ -107,6 +109,7 @@ class gtk_slam_sim:
         self.viewer.NED_spinbutton.east = 0.0
         self.viewer.NED_spinbutton.north = 0.0
         self.viewer.NED_spinbutton.depth = 0.0
+        self.viewer.NED_spinbutton.noise = 0.03
         
         self.viewer.size.width = 10
         self.viewer.size.height = 10
@@ -215,6 +218,11 @@ class gtk_slam_sim:
              self.viewer.NED_spinbutton.depth]
         print "new point set to (N,E,D)", str(p)
         
+    def set_spinbutton_noise(self, widget):
+        self.viewer.NED_spinbutton.noise = widget.get_value()
+        p = self.viewer.NED_spinbutton.noise
+        print "new observation noise set to ", str(p)
+        
     def set_spinbutton_viewer_width(self, widget):
         self.viewer.size.width = widget.get_value()
         self.viewer.size.height = self.viewer.size.width
@@ -255,6 +263,11 @@ class gtk_slam_sim:
         self.vehicle.sensor_fov.set_x_y_far(self.vehicle.fov.x_deg, 
                                             self.vehicle.fov.y_deg, 
                                             self.vehicle.fov.far_m)
+    
+    def set_spinbutton_clutter(self, widget):
+        self.scene.clutter = widget.get_value()
+        print "Set number of FOV clutter points to ", str(self.scene.clutter)
+    
     def undo(self, widget):
         if len(self.scene.__current_list__):
             self.scene.__last_point__ = self.scene.__current_list__.pop()
@@ -305,7 +318,7 @@ class gtk_slam_sim:
     
     def _start_sim_(self):
         try:
-            rospy.wait_for_service("/control_g500/goto", timeout=5)
+            rospy.wait_for_service("/cola2_control/goto", timeout=5)
         except rospy.ROSException:
             print "Could not execute path"
             return
@@ -418,6 +431,13 @@ class gtk_slam_sim:
             visible_landmarks_idx = self.vehicle.sensor_fov.is_visible(relative_landmarks)
             self.vehicle.visible_landmarks.abs = landmarks[visible_landmarks_idx]
             self.vehicle.visible_landmarks.rel = relative_landmarks[visible_landmarks_idx]
+            if self.vehicle.visible_landmarks.rel.shape[0]:
+                self.vehicle.visible_landmarks.noise = (
+                    np.sqrt((self.vehicle.visible_landmarks.rel**2).sum(axis=1))*
+                    self.viewer.NED_spinbutton.noise)
+                self.vehicle.visible_landmarks.noise[self.vehicle.visible_landmarks.noise<0.001] = 0.001
+            else:
+                self.vehicle.visible_landmarks.noise = np.empty(0)
             """
             if self.vehicle.visible_landmarks.rel.shape[0]:
                 inverse_landmarks = featuredetector.tf.absolute(self.vehicle.north_east_depth, 
@@ -489,16 +509,52 @@ class gtk_slam_sim:
     def publish_visible_landmarks(self, *args, **kwargs):
         self.update_visible_landmarks()
         rel_landmarks = self.vehicle.visible_landmarks.rel
+        clutter_pts = self.scene.clutter #np.random.poisson(self.scene.clutter)
+        if clutter_pts:
+            # Draw uniform samples for r, theta, phi
+            clutter_r_theta_phi = np.random.rand(3, clutter_pts)
+            clutter_r_theta_phi[0] *= (self.vehicle.fov.far_m - 0.3)
+            clutter_r_theta_phi[0] += 0.3
+            clutter_r_theta_phi[1:3] -= 0.5
+            #clutter_r_theta_phi[2,:] = 0
+            clutter_r_theta_phi[1:3] *= (np.array([[self.vehicle.fov.x_deg-4], [self.vehicle.fov.y_deg-4]])*np.pi/180)
+            clutter_xyz = np.zeros(clutter_r_theta_phi.shape)
+            misctools.spherical_to_cartesian(clutter_r_theta_phi, clutter_xyz)
+            #clutter_xyz = clutter_xyz.T
+            clutter_landmarks = (clutter_xyz[[2, 0, 1]]).T
+            clutter_noise = (np.sqrt((clutter_xyz.T**2).sum(axis=1))*
+                             self.viewer.NED_spinbutton.noise)
+            clutter_noise[clutter_noise<0.001] = 0.001
+            clutter_noise[:] = self.viewer.NED_spinbutton.noise
+            clutter_landmarks = np.hstack((clutter_landmarks, 
+                clutter_noise[:,np.newaxis]*np.ones(clutter_landmarks.shape)))
+        else:
+            clutter_landmarks = np.empty(0)
+        
+        detected = np.random.rand(rel_landmarks.shape[0])<0.99
+        if detected.shape[0]:
+            rel_landmarks = rel_landmarks[detected]
+        else:
+            rel_landmarks = np.zeros(0)
         if rel_landmarks.shape[0]:
             # Convert xyz to PointCloud message
             #pcl_msg = pointclouds.xyz_array_to_pointcloud2(rel_landmarks, rospy.Time.now(), "slamsim")
             # Convert xyz to PointCloud message with (diagonal) covariance
-            rel_landmarks = np.hstack((rel_landmarks, 0.1*np.ones(rel_landmarks.shape)))
+            noise = self.vehicle.visible_landmarks.noise[detected]
+            std_dev = np.sqrt(noise)
+            #awgn = std_dev[:,np.newaxis]*np.random.normal(size=rel_landmarks.shape)
+            awgn = self.viewer.NED_spinbutton.noise*np.random.normal(size=rel_landmarks.shape)
+            rel_landmarks = np.hstack((rel_landmarks+awgn, noise[:,np.newaxis]*np.ones(rel_landmarks.shape)))
             #self.ros.pcl_header.stamp = rospy.Time.now()
             #self.ros.pcl_header.frame_id = "slamsim"
             #pcl_msg = pc2wrapper.create_cloud(self.ros.pcl_header, self.ros.pcl_fields, rel_landmarks)
-        else:
-            rel_landmarks = np.empty(0)
+        #else:
+        #    rel_landmarks = np.empty(0)
+        
+        if rel_landmarks.shape[0] and clutter_landmarks.shape[0]:
+            rel_landmarks = np.vstack((rel_landmarks, clutter_landmarks))
+        elif clutter_landmarks.shape[0]:
+            rel_landmarks = clutter_landmarks
         pcl_msg = self.ros.pcl_helper.to_pcl(rospy.Time.now(), rel_landmarks)
         pcl_msg.header.frame_id = self.ros.name
         # and publish visible landmarks
@@ -506,7 +562,7 @@ class gtk_slam_sim:
         print "Visible Landmarks (abs):"
         print self.vehicle.visible_landmarks.abs
         print "Publishing:"
-        print self.vehicle.visible_landmarks.rel
+        print rel_landmarks #self.vehicle.visible_landmarks.rel
     
     def set_damage(self):
         self.viewer.LOCK.acquire()
@@ -554,7 +610,7 @@ class gtk_slam_sim:
         
     def draw(self, *args, **kwargs):
         if not self.viewer.DRAW_CANVAS and self.viewer.DRAW_COUNT < 500:
-            self.viewer.canvas.draw_idle()
+            #self.viewer.canvas.draw_idle()
             self.viewer.DRAW_COUNT += 1
             return
         self.viewer.LOCK.acquire()

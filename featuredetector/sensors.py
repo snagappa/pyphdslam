@@ -34,6 +34,7 @@ class camera_fov(object):
         self.tmp._test_dists_ = np.arange(0.05, self.fov_far_m, 0.05)
         self.tmp._test_dists_area_ = 4*self.get_rect__half_width_height(self.tmp._test_dists_).prod(axis=1)
         self.tmp._proportional_area_ = self.tmp._test_dists_area_/self.tmp._test_dists_area_.sum()
+        self.tmp._proportional_vol_ = self.tmp._test_dists_area_*0.05/(0.33*self.tmp._test_dists_area_[-1]*self.fov_far_m)
     
     def is_visible(self, point_xyz):
         if not point_xyz.shape[0]:
@@ -55,8 +56,10 @@ class camera_fov(object):
         return np.array([far*self.tmp.tan_x, far*self.tmp.tan_y]).T
         
     def z_prob(self, far):
-        z_idx = abs(self.tmp._test_dists_[:, np.newaxis] - far).argmin(axis=0)
-        return self.tmp._proportional_area_[z_idx].copy()
+        #z_idx = abs(self.tmp._test_dists_[:, np.newaxis] - far).argmin(axis=0)
+        #return self.tmp._proportional_vol_[z_idx].copy()
+        
+        return (1/(self.tmp._test_dists_area_[-1]*self.fov_far_m/3))*np.ones(far.shape[0])
         
     def pdf_detection(self, ref_ned, ref_rpy, features_abs):
         if not features_abs.shape[0]:
@@ -67,7 +70,7 @@ class camera_fov(object):
                                         dtype=np.float)
         # Take the distance rather than the square?
         dist_from_ref = np.sum(rel_landmarks[:,[0, 1]]**2, axis=1)
-        return np.exp(-dist_from_ref*0.005)*0.98*visible_features_idx
+        return np.exp(-dist_from_ref*0.005)*0.99*visible_features_idx
         
     def pdf_clutter(self, z_rel):
         self.z_prob(z_rel[:,0])

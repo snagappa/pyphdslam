@@ -49,10 +49,10 @@ class GMPHD(object):
                                  np.zeros((0, 3)), np.zeros((0, 3, 3)))
         
         self.vars = STRUCT()
-        self.vars.prune_threshold = 1e-2
-        self.vars.merge_threshold = 0.1
-        self.vars.birth_intensity = 0.25
-        self.vars.clutter_intensity = 0.00075
+        self.vars.prune_threshold = 1e-3
+        self.vars.merge_threshold = 1.5
+        self.vars.birth_intensity = 1e-2
+        self.vars.clutter_intensity = 2.5
         
         self.flags = STRUCT()
         self.flags.ESTIMATE_IS_VALID = False
@@ -79,9 +79,11 @@ class GMPHD(object):
             new_object._estimate_ = self.estimate()
             new_object.vars = copy.copy(self.vars)
             new_object.flags = copy.copy(self.flags)
+            new_object.flags.LOCK = threading.RLock()
             new_object.sensors.camera = copy.deepcopy(self.sensors.camera)
         finally:
             self.flags.LOCK.release()
+        return new_object
     
     def set_states(self, ptr_weights, ptr_states, ptr_covs):
         self.flags.LOCK.acquire()
@@ -110,10 +112,11 @@ class GMPHD(object):
         return (b_wt, b_st, b_cv)
     
     def predict(self, *args, **kwargs):
-        #self.flags.ESTIMATE_IS_VALID = False
-        #if self.covariance.shape[0]:
-        #    extra_cov = 0.1*np.eye(3)
-        #    self.covariance += extra_cov[np.newaxis, :, :]
+        self.flags.ESTIMATE_IS_VALID = False
+        if self.covs.shape[0]:
+            #extra_cov = 0.005*np.eye(3)
+            #self.covs += extra_cov[np.newaxis, :, :]
+            self.covs += np.eye(3)*self.covs*0.1
         pass
     
     def update(self, observations, observation_noise):
@@ -128,7 +131,8 @@ class GMPHD(object):
         
         detection_probability = self.camera_pd(self.parent_ned, 
                                                self.parent_rpy, self.states)
-        detection_probability[detection_probability<0.1] = 0
+        
+        #detection_probability[detection_probability<0.1] = 0
         clutter_pdf = self.camera_clutter(observations)
         clutter_intensity = self.vars.clutter_intensity*clutter_pdf
         
@@ -143,15 +147,16 @@ class GMPHD(object):
             updated.weights = [self.weights*(1-detection_probability)]
             updated.states = [self.states]
             updated.covs = [self.covs]
-            #ZZ SLAM,  step 1:
-            slam_info.exp_sum__pd_predwt = np.exp(-prev_weights.sum())
+            
             # Do the update only for detected landmarks
-            detected_indices = detection_probability >= 0.1
+            detected_indices = detection_probability >= 0
             detected = STRUCT()
             detected.weights = ( prev_weights[detected_indices]*
                                  detection_probability[detected_indices] )
             detected.states = prev_states[detected_indices]
             detected.covs = prev_covs[detected_indices]
+            #ZZ SLAM,  step 1:
+            slam_info.exp_sum__pd_predwt = np.exp(-detected.weights.sum())
             
             # SLAM, prep for step 2:
             slam_info.sum__clutter_with_pd_updwt = np.zeros(num_observations)
@@ -181,32 +186,38 @@ class GMPHD(object):
                                                         INPLACE=False)
                     # Calculate the weight of the Gaussians for this observation
                     # Calculate term in the exponent
-                    x_pdf = np.exp(-0.5*np.power(
-                        blas.dgemv(kalman_info.inv_sqrt_S, 
-                                   residuals, TRANSPOSE_A=True), 2).sum(axis=1))/ \
-                        np.sqrt(kalman_info.det_S*(2*np.pi)**z_dim)
-                    #x_pdf = misctools.mvnpdf(_observation_, pred_z, kalman_info.S)
+                    #code.interact(local=locals())
+                    #x_pdf = np.exp(-0.5*np.power(
+                    #    blas.dgemv(kalman_info.inv_sqrt_S, 
+                    #               residuals, TRANSPOSE_A=True), 2).sum(axis=1))/ \
+                    #    np.sqrt(kalman_info.det_S*(2*np.pi)**z_dim)
+                    x_pdf = misctools.mvnpdf(_observation_, pred_z, kalman_info.S)
                     
                     upd_weights = detected.weights*x_pdf
+                    
                     # Normalise the weights
                     normalisation_factor = ( clutter_intensity[obs_count] + 
+                                             #self.vars.birth_intensity +
                                              upd_weights.sum() )
                     upd_weights /= normalisation_factor
+                    #print "Obs Index: ", str(obs_count+1)
+                    #print upd_weights.sum()
                     # SLAM, step 2:
                     slam_info.sum__clutter_with_pd_updwt[obs_count] = \
                         normalisation_factor
                     
                     # Create new state with new_x and P to add to _states_
-                    updated.weights += [upd_weights]
-                    updated.states += [upd_states]
+                    updated.weights += [upd_weights.copy()]
+                    updated.states += [upd_states.copy()]
                     updated.covs += [detected.covs.copy()]
-                
+                    #print upd_weights.sum()
             else:
                 slam_info.sum__clutter_with_pd_updwt = np.array(clutter_intensity)
-                
+            print " "
             self.weights = np.concatenate(updated.weights)
             self.states = np.concatenate(updated.states)
             self.covs = np.concatenate(updated.covs)
+            
             # SLAM, finalise:
             slam_info.likelihood = (slam_info.exp_sum__pd_predwt * 
                                     slam_info.sum__clutter_with_pd_updwt.prod())
@@ -224,20 +235,27 @@ class GMPHD(object):
                 covs = self.covs.copy()
             finally:
                 self.flags.LOCK.release()
-            intensity = weights.sum()
-            num_targets = min((intensity, weights.shape[0]))
-            num_targets = int(round(num_targets))
+            valid_targets = weights>0.5
+            num_targets = valid_targets.sum()
+            
+            #intensity = weights.sum()
+            #num_targets = min((intensity, weights.shape[0]))
+            #num_targets = int(round(num_targets))
             if num_targets:
-                inds = np.flipud(weights.argsort())
-                inds = inds[0:num_targets]
-                est_weights = weights[inds]
-                est_states = states[inds]
-                est_covs = covs[inds]
-                # Discard states with low weight
-                valid_idx = np.where(est_weights>0.4)[0]
-                self._estimate_ = SAMPLE(est_weights[valid_idx],
-                                         est_states[valid_idx], 
-                                         est_covs[valid_idx])
+                #inds = np.flipud(weights.argsort())
+                #inds = inds[0:num_targets]
+                #est_weights = weights[inds]
+                #est_states = states[inds]
+                #est_covs = covs[inds]
+                ## Discard states with low weight
+                #valid_idx = np.where(est_weights>0.4)[0]
+                #self._estimate_ = SAMPLE(est_weights[valid_idx],
+                #                         est_states[valid_idx], 
+                #                         est_covs[valid_idx])
+                est_weights = weights[valid_targets]
+                est_states = states[valid_targets]
+                est_covs = covs[valid_targets]
+                self._estimate_ = SAMPLE(est_weights, est_states, est_covs)
             else:
                 self._estimate_ = SAMPLE(np.zeros(0), 
                                          np.zeros((0, 3)), np.zeros((0, 3, 3)))
@@ -387,11 +405,11 @@ class GMPHD(object):
     def iterate(self, observations, obs_noise):
         self.predict()
         slam_info = self.update(observations, obs_noise)
-        self.estimate()
-        self.prune()
         if observations.shape[0]:
             self.birth(observations, obs_noise, APPEND=True)
         self.merge_fov()
+        self.estimate()
+        self.prune()
         return slam_info
     
     def intensity(self):
@@ -411,6 +429,7 @@ class GMPHD(object):
                 features_cv = np.repeat([np.eye(3)], features_rel.shape[0], 0)
             else:
                 features_cv = features_cv.copy()
+                
             birth_cv = features_cv
         return (birth_wt, birth_st, birth_cv)
         
@@ -611,7 +630,7 @@ class PHDSLAM(object):
             for i in xrange(self.vars.nparticles)]
         slam_weight_update = np.array([slam_info[i].likelihood])
         self.vehicle.weights *= slam_weight_update/slam_weight_update.sum()
-    
+        
     def estimate(self):
         if not self.flags.ESTIMATE_IS_VALID:
             state, cov = misctools.sample_mn_cv(self.vehicle.states, 
@@ -619,6 +638,18 @@ class PHDSLAM(object):
             self._estimate_.vehicle.ned = SAMPLE(1, state[0: 3], cov[0:3, 0:3])
             max_weight_idx = np.argmax(self.vehicle.weights)
             self._estimate_.map = self.vehicle.maps[max_weight_idx].estimate()
+            """
+            iter_range = range(self.vars.nparticles)
+            map_estimates = [self.vehicle.maps[i].estimate() for i in iter_range]
+            est_gmphd = GMPHD()
+            est_gmphd.vars.merge_threshold = 1
+            for i in iter_range:
+                est_gmphd.append(map_estimates[i].weight*self.vehicle.weights[i], 
+                                 map_estimates[i].state, 
+                                 map_estimates[i].covariance)
+            est_gmphd.merge()
+            self._estimate_.map = est_gmphd.estimate()
+            """
             self.flags.ESTIMATE_IS_VALID = True
         return self._estimate_
     
