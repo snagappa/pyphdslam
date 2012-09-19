@@ -834,7 +834,9 @@ def dpotrf(A, INPLACE=False):
     if not INPLACE:
         A = A.copy()
         fn_return_val = A
+    error_occurred = 0
     exec blas_exec_cmd["dpotrf"]
+    assert error_occurred==0, "Error occurred while computing Cholesky factorisation."
     return fn_return_val
 
 
@@ -858,8 +860,9 @@ def dpotrs(cholA, b, x=None):
     if DEBUG:
         assert_valid_vector(x, "x")
         assert x.shape == (max([cholA.shape[0], b.shape[0]]), b.shape[1]), NUM_ELEM_MISMATCH+V_V_DIM_MISMATCH
-    
+    error_occurred = 0
     exec blas_exec_cmd["dpotrs"]
+    assert error_occurred==0, "Error occurred while computing Cholesky factorisation."
     return fn_return_val
 
 
@@ -875,8 +878,9 @@ def dpotrsx(cholA, b):
         assert_valid_vector(b, "b")
         assert cholA.shape[0] in [1, b.shape[0]], NUM_ELEM_MISMATCH
         assert cholA.shape[2] == b.shape[1], M_V_DIM_MISMATCH
-    
+    error_occurred = 0
     exec blas_exec_cmd["dpotrsx"]
+    assert error_occurred==0, "Error occurred while computing Cholesky factorisation."
 
 
 # Compute inverse using Cholesky factorisation from dpotrf
@@ -893,7 +897,9 @@ def dpotri(A, INPLACE=False):
     if not INPLACE:
         A = A.copy()
         fn_return_val = A
+    error_occurred = 0
     exec blas_exec_cmd["dpotri"]
+    assert error_occurred==0, "Error occurred while computing Cholesky factorisation."
     return fn_return_val
     
 
@@ -935,7 +941,9 @@ def dtrtri(A, UPLO, INPLACE=False):
     if not INPLACE:
         A = A.copy()
         fn_return_val = A
+    error_occurred = 0
     exec blas_exec_cmd["dtrtri"]
+    assert error_occurred==0, "Error occurred while computing Cholesky factorisation."
     return fn_return_val
     
     
@@ -1242,3 +1250,6 @@ def blas_init():
     mktril(A)
     mktriu(A)
     del A, B, C, x, y, UPLO, TR_A, TR_B, SIDE, alpha, beta, LU, ipiv, signum
+
+print "initialising blas wrapper"
+blas_init()

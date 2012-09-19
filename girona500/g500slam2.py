@@ -24,7 +24,7 @@
 
 # ROS imports
 import roslib 
-roslib.load_manifest('g500slam')
+roslib.load_manifest('udg_pandora')
 import rospy
 import tf
 import PyKDL
@@ -43,7 +43,7 @@ from auv_msgs.msg import NavSts
 from std_srvs.srv import Empty, EmptyResponse
 from cola2_navigation.srv import SetNE, SetNEResponse #, SetNERequest
 
-import pyximport; pyximport.install()
+# import pyximport; pyximport.install()
 import lib.slam_worker
 #from lib.slam_worker import PHDSLAM
 PHDSLAM = lib.slam_worker.PHDSLAM
@@ -204,12 +204,12 @@ class G500_SLAM():
             # Create publishers
             ros.nav = STRUCT()
             ros.nav.msg = NavSts()
-            ros.nav.publisher = rospy.Publisher("/g500slam/nav_sts", NavSts)
+            ros.nav.publisher = rospy.Publisher("/phdslam/nav_sts", NavSts)
             # Publish landmarks
             ros.map = STRUCT()
             ros.map.msg = PointCloud2()
             ros.map.publisher = \
-                rospy.Publisher("/g500slam/features", PointCloud2)
+                rospy.Publisher("/phdslam/features", PointCloud2)
             ros.map.helper = \
                 featuredetector.msgs.msgs(featuredetector.msgs.MSG_XYZ_COV)
             
@@ -563,7 +563,7 @@ class G500_SLAM():
         nav_msg.position_variance.east = est_cov[1, 1]
         nav_msg.position_variance.depth = est_cov[2, 2]
         
-        nav_msg.status = np.uint8(np.log10(self.ros.NO_LOCK_ACQUIRE+1))
+        # nav_msg.status = np.uint8(np.log10(self.ros.NO_LOCK_ACQUIRE+1))
         
         #Publish topics
         self.ros.nav.publisher.publish(nav_msg)
@@ -600,7 +600,7 @@ class G500_SLAM():
         self.ros.map.publisher.publish(pcl_msg)
         #print "Landmarks at: "
         #print map_states
-        
+        """
         print "Tracking ", map_estimate.weight.shape[0], \
             " (", map_estimate.weight.sum(), ") targets."
         #print "Intensity = ", map_estimate.weight.sum()
@@ -608,7 +608,7 @@ class G500_SLAM():
             (rospy.Time.now()-self.config.last_time.init).to_sec()
         print "Dropped ", self.ros.NO_LOCK_ACQUIRE, " messages in ", \
             int(dropped_msg_time), " seconds."
-        
+        """
     def debug_print(self, *args, **kwargs):
         print "Weights: "
         #print self.slam_worker.states

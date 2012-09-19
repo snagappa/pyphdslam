@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-__all__ = ["blas", "misctools", "kalmanfilter",  "pointclouds", "pc2wrapper"]
+__all__ = ["blas", "misctools", "kalmanfilter",  "pointclouds", "pc2wrapper", "coord_transform"]
 
 import blas
 import misctools
 import kalmanfilter
+import coord_transform
 
 try:
     import pointclouds

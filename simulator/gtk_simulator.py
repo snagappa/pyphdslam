@@ -33,7 +33,7 @@ import matplotlib.nxutils as nxutils
 #pylab.hold(False) # This will avoid memory leak
 
 import roslib
-roslib.load_manifest("g500slam")
+roslib.load_manifest("udg_pandora")
 from nav_msgs.msg import Odometry
 from auv_msgs.msg import NavSts
 from cola2_control.srv import GotoSrv, GotoSrvRequest
@@ -180,8 +180,8 @@ class gtk_slam_sim:
         #self.ros.pcl_header = PointCloud2().header
         
         # Subscribe to vehicle NavSts as well as the published estimated landmarks
-        rospy.Subscriber("/g500slam/nav_sts", NavSts, self.estimator_update_position)
-        rospy.Subscriber("/g500slam/features", PointCloud2, self.estimator_update_landmarks)
+        rospy.Subscriber("/phdslam/nav_sts", NavSts, self.estimator_update_position)
+        rospy.Subscriber("/phdslam/features", PointCloud2, self.estimator_update_landmarks)
         
         
     def on_MainWindow_delete_event(self, widget, event):

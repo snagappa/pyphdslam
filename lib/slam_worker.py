@@ -213,7 +213,7 @@ class GMPHD(object):
                     #print upd_weights.sum()
             else:
                 slam_info.sum__clutter_with_pd_updwt = np.array(clutter_intensity)
-            print " "
+            
             self.weights = np.concatenate(updated.weights)
             self.states = np.concatenate(updated.states)
             self.covs = np.concatenate(updated.covs)

@@ -22,12 +22,14 @@
 #       
 #      
 
-EXTRA_COMPILE_ARGS = ["-O3 -g -fopenmp"]
-lopenblas = ["openblas"]
+EXTRA_COMPILE_ARGS = ["-O2 -g -fopenmp"]
+#lopenblas = ["openblas"]
 lblas = ["blas"]
-lgsl = ["gsl"]
 llapack = ["lapack"]
-lptf77blas = ["ptf77blas"]+llapack
+lgsl = ["gsl", "gslcblas"]
+# Use this instead if a threaded blas library is available
+#lptf77blas = ["ptf77blas"]+llapack
+lptf77blas = lblas+llapack
 lgomp = ["gomp"]
 
 omp_headers = """
@@ -50,7 +52,7 @@ omp_code = """
     """
     
 lapack_headers = """
-#include <atlas/clapack.h>
+#include <clapack.h>
 
 extern "C" {
     int dpotri_(char *UPLO, int *N, double *A, int *LDA, int *INFO);
@@ -79,8 +81,8 @@ gsl_la_headers = """
 
 
 f77_blas_headers = """
-#include <atlas/cblas.h>
-#include <atlas/clapack.h>
+#include <cblas.h>
+#include <clapack.h>
 
 extern "C" {
     double ddot_(int *N, double *X, int *INCX, double *Y, int *INCY);
@@ -1226,7 +1228,7 @@ class dpotrf:
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
     extra_compile_args = []
-    python_vars = ["A"]
+    python_vars = ["A", "error_occurred"]
     code = """
     int i, num_A;
     int A_rows, A_cols, A_offset;
@@ -1234,7 +1236,7 @@ class dpotrf:
     gsl_error_handler_t *gsl_default_error_handler;
     gsl_default_error_handler = gsl_set_error_handler_off();
     int gsl_error_value;
-    int error_occurred = 0;
+    //int error_occurred = 0;
     
     num_A = NA[0];
     A_rows = NA[1]; A_cols = NA[2];
@@ -1251,7 +1253,7 @@ class dpotrf:
             }
         }
     }
-    exception_occurred = error_occurred;
+    //exception_occurred = error_occurred;
     gsl_set_error_handler(gsl_default_error_handler);
     """
 
@@ -1263,7 +1265,7 @@ class dpotrs:
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
     extra_compile_args = []
-    python_vars = ["cholA", "b", "x"]
+    python_vars = ["cholA", "b", "x", "error_occurred"]
     code = """
     int i, num_A, num_b, num_x;
     int A_rows, A_cols, A_offset, b_offset, x_offset;
@@ -1272,7 +1274,7 @@ class dpotrs:
     gsl_error_handler_t *gsl_default_error_handler;
     gsl_default_error_handler = gsl_set_error_handler_off();
     int gsl_error_value;
-    int error_occurred = 0;
+    //int error_occurred = 0;
     
     num_A = NcholA[0];
     A_rows = NcholA[1];
@@ -1296,7 +1298,7 @@ class dpotrs:
             }
         }
     }
-    exception_occurred = error_occurred;
+    //exception_occurred = error_occurred;
     gsl_set_error_handler(gsl_default_error_handler);
     """
     
@@ -1308,7 +1310,7 @@ class dpotrsx:
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
     extra_compile_args = []
-    python_vars = ["cholA", "b"]
+    python_vars = ["cholA", "b", "error_occurred"]
     code = """
     int i, num_A, num_x;
     int A_rows, A_cols, A_offset, x_offset;
@@ -1317,7 +1319,7 @@ class dpotrsx:
     gsl_error_handler_t *gsl_default_error_handler;
     gsl_default_error_handler = gsl_set_error_handler_off();
     int gsl_error_value;
-    int error_occurred = 0;
+    //int error_occurred = 0;
     
     num_A = NcholA[0];
     A_rows = NcholA[1];
@@ -1338,7 +1340,7 @@ class dpotrsx:
             }
         }
     }
-    exception_occurred = error_occurred;
+    //exception_occurred = error_occurred;
     gsl_set_error_handler(gsl_default_error_handler);
     """
     
@@ -1350,7 +1352,7 @@ class dpotri:
     support_code = gsl_la_headers+omp_headers
     libraries = lptf77blas+lgomp+llapack+lgsl
     extra_compile_args = []
-    python_vars = ["A"]
+    python_vars = ["A", "error_occurred"]
     code = """
     int i, j, num_A;
     int A_rows, A_cols, A_offset;
@@ -1358,7 +1360,7 @@ class dpotri:
     gsl_error_handler_t *gsl_default_error_handler;
     gsl_default_error_handler = gsl_set_error_handler_off();
     int gsl_error_value;
-    int error_occurred = 0;
+    //int error_occurred = 0;
     
     num_A = NA[0];
     A_rows = NA[1];
@@ -1375,7 +1377,7 @@ class dpotri:
             }
         }
     }
-    exception_occurred = error_occurred;
+    //exception_occurred = error_occurred;
     gsl_set_error_handler(gsl_default_error_handler);
     """
     
@@ -1385,9 +1387,9 @@ class dtrtri:
     def __call__(self):
         return python_vars, code, support_code, libs
     support_code = omp_headers+gsl_blas_headers
-    libraries = lptf77blas+lgomp+llapack+lgsl + ["cblas", "lapack_atlas"] 
+    libraries = lptf77blas+lgomp+llapack+lgsl# + ["cblas", "lapack_atlas"] 
     extra_compile_args = []
-    python_vars = ["A"]
+    python_vars = ["A", "error_occurred"]
     code = """
     int i, j, num_A;
     int A_rows, A_cols, A_offset;
@@ -1398,7 +1400,7 @@ class dtrtri:
     gsl_error_handler_t *gsl_default_error_handler;
     gsl_default_error_handler = gsl_set_error_handler_off();
     int gsl_error_value;
-    int error_occurred = 0;
+    //int error_occurred = 0;
     
     num_A = NA[0];
     A_rows = NA[1];
@@ -1415,7 +1417,7 @@ class dtrtri:
             }
         }
     }
-    exception_occurred = error_occurred;
+    //exception_occurred = error_occurred;
     gsl_set_error_handler(gsl_default_error_handler);
     """
 
